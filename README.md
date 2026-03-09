@@ -28,7 +28,7 @@ The pipeline processes [AnnotSV](https://lbgi.fr/AnnotSV/)-annotated output file
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/your-username/cnv-sv-pipeline.git
+git clone https://github.com/AlvaroSantamariaMartinez/cnv-sv-pipeline.git
 cd cnv-sv-pipeline
 ```
 
@@ -184,5 +184,5 @@ MIT License — see [LICENSE](LICENSE).
 If you use this pipeline in your work, please cite the repository:
 
 ```
-STEA CNV/SV Analysis Pipeline. GitHub: https://github.com/your-username/cnv-sv-pipeline
+STEA CNV/SV Analysis Pipeline. GitHub: https://github.com/AlvaroSantamariaMartinez/cnv-sv-pipeline
 ```
