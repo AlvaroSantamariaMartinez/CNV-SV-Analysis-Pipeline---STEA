@@ -22,10 +22,10 @@ library(httr)
 library(jsonlite)
 library(bsicons)
 
-# ── Operador null-coalescing (debe definirse ANTES de cualquier uso) ──────────
+# ── Null-coalescing operator (must be defined BEFORE any use) ──────────
 `%||%` <- function(a, b) if (!is.null(a)) a else b
 
-# ── Ruta al script del pipeline (mismo directorio que app.R) ─────────────────
+# ── Path to the pipeline script (same directory as app.R) ─────────────────
 PIPELINE_SCRIPT <- tryCatch({
   doc_path <- rstudioapi::getActiveDocumentContext()$path
   if (nzchar(doc_path))
@@ -56,7 +56,7 @@ CONFIG_DEFAULTS <- list(
 )
 
 #=============================================================================
-# PALETA DE COLORES HERENCIA / RANGO
+# INHERITANCE / RANGE COLOR PALETTE
 # =============================================================================
 HER_COLORS <- c(
   "De novo"           = "#CC0000",
@@ -66,8 +66,8 @@ HER_COLORS <- c(
   "Paternal (Probable)"= "#4499DD",
   "Maternal (Probable)"= "#DD9944",
   "Combined (Probable)"="#9944DD",
-  "Desconocido"       = "#D5D8DC",
-  "Sin datos"         = "#AAAAAA"
+  "Unknown"       = "#D5D8DC",
+  "No data"         = "#AAAAAA"
 )
 RANGO_COLORS <- c(
   "Strict" = "#155724",
@@ -75,7 +75,7 @@ RANGO_COLORS <- c(
   "Outside"    = "#9C0006"
 )
 
-# Longitudes cromosomicas hg38 (pb)
+# Chromosome lengths hg38 (bp)
 CHR_LENGTHS <- c(
   "1"=248956422, "2"=242193529, "3"=198295559, "4"=190214555,
   "5"=181538259, "6"=170805979, "7"=159345973, "8"=145138636,
@@ -103,8 +103,8 @@ abrir_archivo_nativo <- function(ruta) {
   TRUE
 }
 
-cargar_todos_resultados <- function(ruta_salida) {
-  message("\n--- CARGANDO RESULTADOS ---")
+cargar_todos_Results <- function(ruta_salida) {
+  message("\n--- CARGANDO Results ---")
   ruta_norm <- normalizePath(trimws(ruta_salida), winslash = "/", mustWork = FALSE)
   
   archivos <- list.files(ruta_norm,
@@ -515,13 +515,13 @@ ui <- page_navbar(
     layout_columns(
       col_widths = c(6, 6),
       card(
-        card_header(class = "bg-primary text-white", bsicons::bs_icon("folder2-open"), " Rutas de archivos"),
+        card_header(class = "bg-primary text-white", bsicons::bs_icon("folder2-open"), " File paths"),
         card_body(
           textInput("cfg_entrada",  "📂 Input folder (families HI/PA/MA)", value = CONFIG_DEFAULTS$ruta_entrada, width = "100%"),
           textInput("cfg_salida",   "📁 Output folder (results)", value = CONFIG_DEFAULTS$ruta_salida,  width = "100%"),
           textInput("cfg_rangos",   "📋 Reference ranges file (.xlsx)", value = CONFIG_DEFAULTS$ruta_rangos,  width = "100%"),
           textInput("cfg_panel",    "🧬 Panel de genes (.txt)", value = CONFIG_DEFAULTS$ruta_panel,   width = "100%"),
-          actionButton("btn_validar_rutas", "✔ Validar rutas", class = "btn-outline-primary btn-sm mt-1")
+          actionButton("btn_validar_rutas", "✔ Validate paths", class = "btn-outline-primary btn-sm mt-1")
         )
       ),
       card(
@@ -529,20 +529,20 @@ ui <- page_navbar(
         card_body(
           layout_columns(
             col_widths = c(6, 6),
-            numericInput("cfg_umbral_strict", "Umbral estricto", value = CONFIG_DEFAULTS$umbral_strict, min = 0, max = 1, step = 0.05),
-            numericInput("cfg_umbral_her", "Sim herencia (Fuerte)", value = CONFIG_DEFAULTS$umbral_herencia, min = 0, max = 1, step = 0.05)
+            numericInput("cfg_umbral_strict", "Strict threshold", value = CONFIG_DEFAULTS$umbral_strict, min = 0, max = 1, step = 0.05),
+            numericInput("cfg_umbral_her", "Inheritance similarity (Strong)", value = CONFIG_DEFAULTS$umbral_herencia, min = 0, max = 1, step = 0.05)
           ),
           layout_columns(
             col_widths = c(6, 6),
-            numericInput("cfg_umbral_her_lax", "Sim herencia (Probable)", value = CONFIG_DEFAULTS$umbral_herencia_lax, min = 0, max = 1, step = 0.05),
-            numericInput("cfg_umbral_jaccard", "Umbral Jaccard", value = CONFIG_DEFAULTS$umbral_jaccard, min = 0, max = 1, step = 0.05)
+            numericInput("cfg_umbral_her_lax", "Inheritance similarity (Probable)", value = CONFIG_DEFAULTS$umbral_herencia_lax, min = 0, max = 1, step = 0.05),
+            numericInput("cfg_umbral_jaccard", "Jaccard threshold", value = CONFIG_DEFAULTS$umbral_jaccard, min = 0, max = 1, step = 0.05)
           ),
           layout_columns(
             col_widths = c(6, 6),
-            numericInput("cfg_margen", "Margen lateral (Mb)", value = CONFIG_DEFAULTS$margen_lateral / 1e6, min = 0, max = 20, step = 0.5),
+            numericInput("cfg_margen", "Lateral margin (Mb)", value = CONFIG_DEFAULTS$margen_lateral / 1e6, min = 0, max = 20, step = 0.5),
             numericInput("cfg_cores", "Processing cores", value = CONFIG_DEFAULTS$n_cores, min = 1, max = parallel::detectCores(), step = 1)
           ),
-          checkboxInput("cfg_dedup", "Deduplicar regiones similares", value = CONFIG_DEFAULTS$deduplicar),
+          checkboxInput("cfg_dedup", "Deduplicate similar regions", value = CONFIG_DEFAULTS$deduplicar),
           hr(),
           div(class = "d-flex align-items-center gap-2",
               actionButton("btn_guardar_config", "💾 Save configuration", class = "btn-success"),
@@ -550,7 +550,7 @@ ui <- page_navbar(
               
               # --- NEW DARK MODE BUTTON ---
               tags$span(class = "ms-auto"), # Empuja el interruptor a la derecha
-              tags$span(class = "text-muted small fw-bold mb-0", "Tema visual:"),
+              tags$span(class = "text-muted small fw-bold mb-0", "Visual theme:"),
               input_dark_mode(id = "modo_noche", mode = "light")
               # ----------------------------------
           ),
@@ -569,18 +569,18 @@ ui <- page_navbar(
       card(
         card_header(class = "bg-success text-white", bsicons::bs_icon("rocket-takeoff"), " Launch analysis"),
         card_body(
-          p(class = "text-muted small", "Ejecuta el pipeline completo sobre todas las familias detectadas en la carpeta de entrada."),
+          p(class = "text-muted small", "Runs the full pipeline on all families detected in the input folder."),
           hr(),
           div(
             class = "d-grid gap-2",
-            actionButton("btn_run_todo",    "▶ Ejecutar cohorte completa", class = "btn-success btn-lg"),
-            actionButton("btn_run_carpeta", "▶ Ejecutar carpeta concreta", class = "btn-outline-success"),
-            textInput("inp_carpeta_ruta", NULL, placeholder = "Ruta de carpeta batch", width = "100%"),
-            actionButton("btn_run_familia", "▶ Ejecutar familia concreta", class = "btn-outline-success"),
-            textInput("inp_familia_id", NULL, placeholder = "ID familia (p.ej. G04PMP069)", width = "100%")
+            actionButton("btn_run_todo",    "▶ Run full cohort", class = "btn-success btn-lg"),
+            actionButton("btn_run_carpeta", "▶ Run specific folder", class = "btn-outline-success"),
+            textInput("inp_carpeta_ruta", NULL, placeholder = "Batch folder path", width = "100%"),
+            actionButton("btn_run_familia", "▶ Run specific family", class = "btn-outline-success"),
+            textInput("inp_familia_id", NULL, placeholder = "Family ID (e.g. G04PMP069)", width = "100%")
           ),
           hr(),
-          actionButton("btn_stop", "⏹ Detener", class = "btn-danger btn-sm", disabled = TRUE),
+          actionButton("btn_stop", "⏹ Stop", class = "btn-danger btn-sm", disabled = TRUE),
           hr(),
           div(class = "d-flex align-items-center gap-2", uiOutput("ui_run_status"))
         )
@@ -600,7 +600,7 @@ ui <- page_navbar(
   ),
   
   nav_panel(
-    title = tagList(bsicons::bs_icon("table"), " Resultados"),
+    title = tagList(bsicons::bs_icon("table"), " Results"),
     value = "tab_results",
     div(
       style = "display:flex; gap:8px; align-items:flex-start;",
@@ -613,14 +613,14 @@ ui <- page_navbar(
           card_header(class = "bg-info text-white", bsicons::bs_icon("funnel-fill"), " Filtros"),
           card_body(
             style = "overflow-y:auto;",
-            actionButton("btn_cargar_resultados", "🔄 Cargar / Actualizar", class = "btn-info btn-sm w-100"),
+            actionButton("btn_cargar_Results", "🔄 Load / Refresh", class = "btn-info btn-sm w-100"),
             hr(),
-            radioButtons("filtro_modalidad", "Modalidad", choices  = c("CNVs", "SVs", "Ambas"), selected = "Ambas", inline = TRUE),
+            radioButtons("filtro_modalidad", "Modality", choices  = c("CNVs", "SVs", "Ambas"), selected = "Ambas", inline = TRUE),
             hr(),
-            selectizeInput("filtro_familia", "Familia(s)", choices  = NULL, multiple = TRUE, options  = list(placeholder = "Todas")),
-            selectizeInput("filtro_herencia", "Tipo herencia", choices  = NULL, multiple = TRUE, options  = list(placeholder = "Todas")),
-            selectizeInput("filtro_sv_type", "Tipo de variante", choices  = NULL, multiple = TRUE, options  = list(placeholder = "Todos")),
-            selectizeInput("filtro_rango", "Tipo rango", choices  = c("Strict","Wide","Outside"), multiple = TRUE, options  = list(placeholder = "Todos")),
+            selectizeInput("filtro_familia", "Family/Families", choices  = NULL, multiple = TRUE, options  = list(placeholder = "Todas")),
+            selectizeInput("filtro_herencia", "Inheritance type", choices  = NULL, multiple = TRUE, options  = list(placeholder = "Todas")),
+            selectizeInput("filtro_sv_type", "Variant type", choices  = NULL, multiple = TRUE, options  = list(placeholder = "All")),
+            selectizeInput("filtro_rango", "Range type", choices  = c("Strict","Wide","Outside"), multiple = TRUE, options  = list(placeholder = "All")),
             selectInput("filtro_flagged", "🚩 Tags",
                         choices  = c("Todas" = "todas", "Con Tag" = "con", "Sin Tag" = "sin"),
                         selected = "todas"),
@@ -629,14 +629,14 @@ ui <- page_navbar(
                                      "Benign" = "Benign", "VUS" = "VUS",
                                      "Pathogenic" = "Pathogenic", "In Progress" = "In Progress"),
                         selected = "todas"),
-            selectInput("filtro_sexo", "♂/♀ Sexo",
+            selectInput("filtro_sexo", "♂/♀ Sex",
                         choices  = c("All" = "all", "Male ♂" = "M", "Female ♀" = "F", "Unknown" = "ND"),
                         selected = "todos"),
             checkboxInput("filtro_sfari", "Gene panel only", value = FALSE),
             textInput("filtro_gen", "🔍 Search gene", placeholder = "E.g.: SHANK3, NRXN1...", width = "100%"),
             hr(),
             sliderInput("filtro_score", "AnnotSV Score (min.)", min = -1, max = 1, value = -1, step = 0.05),
-            checkboxInput("filtro_solo_con_score", "🔢 SCORE — ocultar sin valor", value = FALSE),
+            checkboxInput("filtro_solo_con_score", "🔢 SCORE — hide without value", value = FALSE),
             hr(),
             tags$details(
               tags$summary(style="cursor:pointer; font-weight:600; font-size:0.88em; color:#2C6FAC; user-select:none;",
@@ -647,7 +647,7 @@ ui <- page_navbar(
                                                   "Tipo_Herencia","Genotipo_Hijo","Tipo_Rango","AnnotSV_ranking_score",
                                                   "En_Panel_Genes","Gene_name","Illumina_DRAGEN.exact.counts",
                                                   "Illumina_DRAGEN.similar.counts","Referencia_Match",
-                                                  "Sim_MaxLen","Jaccard","Confianza_Region","Annotation_mode","Modalidad"),
+                                                  "Sim_MaxLen","Jaccard","Confianza_Region","Annotation_mode","Modality"),
                                      selected = c("ID_Familia","SV_chrom","SV_start","SV_end","SV_length","SV_type",
                                                   "Tipo_Herencia","Genotipo_Hijo","Tipo_Rango","AnnotSV_ranking_score",
                                                   "En_Panel_Genes","Gene_name","Illumina_DRAGEN.exact.counts",
@@ -655,18 +655,18 @@ ui <- page_navbar(
                                                   "Sim_MaxLen","Jaccard","Confianza_Region")
                   ),
                   div(class="d-flex gap-1 mt-1",
-                      actionButton("btn_aplicar_columnas", "✔ Aplicar", class="btn-primary btn-sm"),
+                      actionButton("btn_aplicar_columnas", "✔ Apply", class="btn-primary btn-sm"),
                       actionButton("btn_reset_columnas",   "↺ Reset",   class="btn-outline-secondary btn-sm")
                   )
               )
             ),
             hr(),
             div(class = "d-grid gap-2",
-                downloadButton("btn_descargar_xlsx", "⬇ Descargar Excel filtrado", class = "btn-primary btn-sm"),
-                downloadButton("btn_descargar_csv",  "⬇ Descargar CSV filtrado", class = "btn-outline-secondary btn-sm"),
+                downloadButton("btn_descargar_xlsx", "⬇ Download filtered Excel", class = "btn-primary btn-sm"),
+                downloadButton("btn_descargar_csv",  "⬇ Download filtered CSV", class = "btn-outline-secondary btn-sm"),
                 hr(),
                 tags$p(class="text-muted small mb-1", "📄 Clinical report per family"),
-                selectInput("pdf_familia_sel", NULL, choices = c("— Selecciona familia —" = ""), width = "100%"),
+                selectInput("pdf_familia_sel", NULL, choices = c("— Select family —" = ""), width = "100%"),
                 downloadButton("btn_pdf_familia", "📄 Generate PDF report", class = "btn-outline-primary btn-sm w-100")
             )
           )
@@ -715,17 +715,17 @@ ui <- page_navbar(
           div(
             class = "p-2 rounded mb-2",
             style = "background:var(--dm-info-bg); border:1px solid var(--dm-info-border);",
-            tags$b(class = "small d-block mb-1", "\U0001f4ca Fuente de datos"),
+            tags$b(class = "small d-block mb-1", "\U0001f4ca Data source"),
             tags$small(class = "text-muted",
                        "Los gr\u00e1ficos reflejan la selecci\u00f3n activa de ",
-                       tags$b("Resultados"), ": modalidad, familias, herencia, rango, SFARI, gen, score\u2026")
+                       tags$b("Results"), ": modalidad, familias, herencia, rango, SFARI, gen, score\u2026")
           ),
           hr(),
           uiOutput("ui_est_resumen_filtro"),
           hr(),
           actionButton("btn_est_refresh", "\U0001f504 Recalcular", class = "btn-info btn-sm w-100"),
           div(class = "mt-2",
-              actionButton("btn_ir_resultados", "\u2190 Ir a Resultados",
+              actionButton("btn_ir_Results", "\u2190 Ir a Results",
                            class = "btn-outline-secondary btn-sm w-100"))
         )
       ),
@@ -741,7 +741,7 @@ ui <- page_navbar(
           ),
           card(
             full_screen = TRUE,
-            card_header(bsicons::bs_icon("bar-chart-steps"), " Variantes por familia (apilado por herencia)"),
+            card_header(bsicons::bs_icon("bar-chart-steps"), " Variants per family (stacked by inheritance)"),
             card_body(class = "p-1", plotlyOutput("est_plot_carga_familia", height = "300px"))
           )
         ),
@@ -754,7 +754,7 @@ ui <- page_navbar(
           ),
           card(
             full_screen = TRUE,
-            card_header(bsicons::bs_icon("speedometer2"), " Score por tipo de herencia (boxplot)"),
+            card_header(bsicons::bs_icon("speedometer2"), " Score by inheritance type (boxplot)"),
             card_body(class = "p-1", plotlyOutput("est_plot_score_her", height = "300px"))
           )
         ),
@@ -762,12 +762,12 @@ ui <- page_navbar(
           col_widths = c(6, 6),
           card(
             full_screen = TRUE,
-            card_header(bsicons::bs_icon("diagram-3"), " Variantes por cromosoma"),
+            card_header(bsicons::bs_icon("diagram-3"), " Variants per chromosome"),
             card_body(class = "p-1", plotlyOutput("est_plot_por_chr", height = "300px"))
           ),
           card(
             full_screen = TRUE,
-            card_header(bsicons::bs_icon("grid-3x2"), " Mapa cromosoma x familia"),
+            card_header(bsicons::bs_icon("grid-3x2"), " Chromosome × family map"),
             card_body(class = "p-1", plotlyOutput("est_plot_heatmap_chr", height = "300px"))
           )
         ),
@@ -798,7 +798,7 @@ ui <- page_navbar(
           ),
           card(
             full_screen = TRUE,
-            card_header(bsicons::bs_icon("table"), " Resumen por gen (top 30)"),
+            card_header(bsicons::bs_icon("table"), " Gene summary (top 30)"),
             card_body(class = "p-1", DTOutput("est_tabla_genes", height = "340px"))
           )
         ),
@@ -806,17 +806,17 @@ ui <- page_navbar(
           col_widths = c(4, 4, 4),
           card(
             full_screen = TRUE,
-            card_header(bsicons::bs_icon("bullseye"), " Tipo de rango"),
+            card_header(bsicons::bs_icon("bullseye"), " Range type"),
             card_body(class = "p-1", plotlyOutput("est_plot_rango", height = "260px"))
           ),
           card(
             full_screen = TRUE,
-            card_header(bsicons::bs_icon("copy"), " Tipo de variante (DEL / DUP)"),
+            card_header(bsicons::bs_icon("copy"), " Variant type (DEL / DUP)"),
             card_body(class = "p-1", plotlyOutput("est_plot_tipo_sv", height = "260px"))
           ),
           card(
             full_screen = TRUE,
-            card_header(bsicons::bs_icon("person-lines-fill"), " Score medio por familia"),
+            card_header(bsicons::bs_icon("person-lines-fill"), " Mean score per family"),
             card_body(class = "p-1", plotlyOutput("est_plot_score_familia", height = "260px"))
           )
         ),
@@ -829,12 +829,12 @@ ui <- page_navbar(
           ),
           card(
             full_screen = TRUE,
-            card_header(bsicons::bs_icon("bar-chart-fill"), " Carga de variantes por sexo"),
+            card_header(bsicons::bs_icon("bar-chart-fill"), " Variant burden by sex"),
             card_body(class = "p-1", plotlyOutput("est_plot_carga_sexo", height = "260px"))
           ),
           card(
             full_screen = TRUE,
-            card_header(bsicons::bs_icon("speedometer"), " Score por sexo (boxplot)"),
+            card_header(bsicons::bs_icon("speedometer"), " Score by sex (boxplot)"),
             card_body(class = "p-1", plotlyOutput("est_plot_score_sexo", height = "260px"))
           )
         ),
@@ -842,7 +842,7 @@ ui <- page_navbar(
           col_widths = c(6, 6),
           card(
             full_screen = TRUE,
-            card_header(bsicons::bs_icon("bar-chart-steps"), " Herencia por sexo (apilado)"),
+            card_header(bsicons::bs_icon("bar-chart-steps"), " Inheritance by sex (stacked)"),
             card_body(class = "p-1", plotlyOutput("est_plot_herencia_sexo", height = "300px"))
           ),
           card(
@@ -860,7 +860,7 @@ ui <- page_navbar(
     align = "left",
     
     nav_panel(
-      title = tagList(bsicons::bs_icon("map"), " Ideograma"),
+      title = tagList(bsicons::bs_icon("map"), " Ideogram"),
       value = "tab_ideograma",
       card(
         card_header(
@@ -880,7 +880,7 @@ ui <- page_navbar(
     
     
     nav_panel(
-      title = tagList(bsicons::bs_icon("columns-gap"), " Comparador"),
+      title = tagList(bsicons::bs_icon("columns-gap"), " Comparator"),
       value = "tab_comparador",
       layout_columns(
         col_widths = c(3, 9),
@@ -890,16 +890,16 @@ ui <- page_navbar(
             div(class="d-flex align-items-center gap-1 mb-1",
                 div(class="rounded-circle flex-shrink-0",
                     style="width:12px;height:12px;background:#2C6FAC;"),
-                tags$b("Familia A", style="color:#2C6FAC;")),
-            selectizeInput("comp_fam_a", NULL, choices=NULL, options=list(placeholder="Selecciona...")),
+                tags$b("Family A", style="color:#2C6FAC;")),
+            selectizeInput("comp_fam_a", NULL, choices=NULL, options=list(placeholder="Select...")),
             div(class="d-flex align-items-center gap-1 mb-1 mt-2",
                 div(class="rounded-circle flex-shrink-0",
                     style="width:12px;height:12px;background:#E67E22;"),
-                tags$b("Familia B", style="color:#E67E22;")),
-            selectizeInput("comp_fam_b", NULL, choices=NULL, options=list(placeholder="Selecciona...")),
+                tags$b("Family B", style="color:#E67E22;")),
+            selectizeInput("comp_fam_b", NULL, choices=NULL, options=list(placeholder="Select...")),
             hr(),
-            radioButtons("comp_modalidad", "Modalidad", choices=c("CNVs","SVs","Ambas"), selected="Ambas", inline=TRUE),
-            numericInput("comp_umbral", "Umbral solapamiento (%)", value=50, min=10, max=100, step=5),
+            radioButtons("comp_modalidad", "Modality", choices=c("CNVs","SVs","Ambas"), selected="Ambas", inline=TRUE),
+            numericInput("comp_umbral", "Overlap threshold (%)", value=50, min=10, max=100, step=5),
             hr(),
             actionButton("btn_comparar", "⚖ Compare families", class="btn-primary w-100"),
             hr(),
@@ -935,7 +935,7 @@ ui <- page_navbar(
         card(
           card_header(
             class = "d-flex justify-content-between align-items-center",
-            div(bsicons::bs_icon("map"), " Ideograma de genes afectados"),
+            div(bsicons::bs_icon("map"), " Ideogram de genes afectados"),
             div(class = "d-flex align-items-center gap-2",
                 tags$span(class = "badge bg-secondary", uiOutput("ui_genes_badge", inline=TRUE)),
                 checkboxInput("genes_solo_sfari", "Panel only", value = FALSE, width = "auto")
@@ -947,7 +947,7 @@ ui <- page_navbar(
           )
         ),
         card(
-          card_header(bsicons::bs_icon("info-circle"), " Detalle del gen seleccionado"),
+          card_header(bsicons::bs_icon("info-circle"), " Selected gene detail"),
           card_body(class = "p-2",
                     uiOutput("ui_gen_detalle")
           )
@@ -974,9 +974,9 @@ ui <- page_navbar(
                       bsicons::bs_icon("people-fill"), " Familias y genes"),
           card_body(class = "p-2 d-flex flex-column gap-2", style = "overflow:auto;",
                     div(class = "mb-1",
-                        tags$label(class = "form-label fw-bold small", "Seleccionar familias"),
+                        tags$label(class = "form-label fw-bold small", "Select families"),
                         selectizeInput("hpo_familias_sel", label = NULL, choices = NULL, multiple = TRUE,
-                                       options = list(placeholder = "Elige una o varias familias…",
+                                       options = list(placeholder = "Choose one or more families…",
                                                       plugins = list("remove_button")), width = "100%")),
                     div(class = "d-flex justify-content-between align-items-center mb-1",
                         tags$span(class = "fw-bold small", "\U0001f9ec Genes afectados"),
@@ -994,7 +994,7 @@ ui <- page_navbar(
           card_header(class = "d-flex align-items-center justify-content-between gap-2",
                       style = "font-size:0.9em;",
                       div(class = "d-flex align-items-center gap-2",
-                          bsicons::bs_icon("clipboard2-pulse"), " Visor HPO"),
+                          bsicons::bs_icon("clipboard2-pulse"), " HPO Viewer"),
                       uiOutput("ui_hpo_visor_badge")),
           card_body(class = "p-2", style = "overflow:auto; height:calc(90vh - 54px);",
                     uiOutput("ui_hpo_visor"))
@@ -1005,9 +1005,9 @@ ui <- page_navbar(
                       bsicons::bs_icon("journal-text"), " Descripci\u00f3n HPO del paciente"),
           card_body(class = "p-2 d-flex flex-column gap-2", style = "overflow:auto;",
                     div(class = "mb-1",
-                        tags$label(class = "form-label fw-bold small", "Familia activa para notas"),
+                        tags$label(class = "form-label fw-bold small", "Active family for notes"),
                         selectizeInput("hpo_fam_nota_sel", label = NULL, choices = NULL,
-                                       options = list(placeholder = "Selecciona una familia\u2026"), width = "100%")),
+                                       options = list(placeholder = "Select a family\u2026"), width = "100%")),
                     uiOutput("ui_hpo_nota_panel")
           )
         )
@@ -1049,15 +1049,15 @@ ui <- page_navbar(
                         choices = c(
                           "Wilcoxon / Mann-Whitney (2 grupos)"  = "wilcoxon",
                           "Kruskal-Wallis (>=3 grupos)"          = "kruskal",
-                          "Chi-cuadrado de independencia"        = "chisq",
-                          "Test exacto de Fisher"                = "fisher",
-                          "Correlacion de Spearman"              = "spearman",
-                          "Correlacion de Pearson"               = "pearson",
-                          "Normalidad - Shapiro-Wilk"            = "shapiro",
-                          "Kolmogorov-Smirnov (2 muestras)"      = "ks",
-                          "Test binomial de proporciones"        = "prop_binom",
-                          "Comparacion de proporciones 2 grupos" = "prop2",
-                          "Carga por familia (Poisson)"          = "burden"
+                          "Chi-squared independence test"        = "chisq",
+                          "Fisher's exact test"                = "fisher",
+                          "Spearman correlation"              = "spearman",
+                          "Pearson correlation"               = "pearson",
+                          "Normality - Shapiro-Wilk"            = "shapiro",
+                          "Kolmogorov-Smirnov (2 samples)"      = "ks",
+                          "Binomial proportions test"        = "prop_binom",
+                          "2-group proportions comparison" = "prop2",
+                          "Family burden (Poisson)"          = "burden"
                         ),
                         selected = "wilcoxon", width = "100%"
             ),
@@ -1077,7 +1077,7 @@ ui <- page_navbar(
         )
       ),
       
-      # Panel derecho: resultados
+      # Panel derecho: Results
       div(
         style = "display:flex; flex-direction:column; gap:12px;",
         uiOutput("ui_test_resultado"),
@@ -1102,7 +1102,7 @@ ui <- page_navbar(
   ),  # end nav_panel statistical tests
   
   nav_panel(
-    title = tagList(bsicons::bs_icon("clock-history"), " Historial"),
+    title = tagList(bsicons::bs_icon("clock-history"), " History"),
     value = "tab_historial",
     card(
       card_header(
@@ -1125,7 +1125,7 @@ ui <- page_navbar(
       class = "container-fluid py-3",
       style = "max-width:1100px; margin:0 auto;",
       
-      # ── Cabecera ────────────────────────────────────────────────────────────
+      # ── Header ─────────────────────────────────────────────────────────────
       div(
         class = "p-4 mb-4 rounded-3",
         style = "background: linear-gradient(135deg, #1A2980 0%, #2C6FAC 100%); color:white;",
@@ -1133,161 +1133,161 @@ ui <- page_navbar(
             div(style = "font-size:3em;", "\U0001f9ec"),
             div(
               h2(class = "mb-1", style = "font-weight:800; letter-spacing:-0.02em;",
-                 "CNV/SV Analysis Pipeline 2014 FiltroB"),
+                 "CNV/SV Analysis Pipeline -- STEA"),
               p(class = "mb-0", style = "opacity:0.85; font-size:1.05em;",
-                "Interfaz de an\u00e1lisis automatizado de variantes de n\u00famero de copia (CNV) ",
-                "y variantes estructurales (SV).")
+                "Automated analysis interface for copy number variants (CNV) ",
+                "and structural variants (SV).")
             )
         )
       ),
       
-      # ── Dos columnas principales ─────────────────────────────────────────────
+      # ── Two main columns ────────────────────────────────────────────────────
       layout_columns(
         col_widths = c(7, 5),
         
-        # ── Left column: usage guide ──────────────────────────────────
+        # ── Left column: usage guide ────────────────────────────────────────
         div(
           
           # USAGE GUIDE
           card(
             card_header(
               class = "fw-bold dm-about-guide",
-              bsicons::bs_icon("map"), " Gu\u00eda de uso paso a paso"
+              bsicons::bs_icon("map"), " Step-by-step usage guide"
             ),
             card_body(
               class = "p-3",
               style = "font-size:0.92em;",
               
-              # Paso 1
+              # Step 1
               div(class = "d-flex gap-3 mb-3",
                   div(class = "rounded-circle text-white d-flex align-items-center justify-content-center flex-shrink-0",
                       style = "width:32px;height:32px;background:#2C6FAC;font-weight:700;", "1"),
                   div(
-                    tags$b("\u2699\ufe0f Configuraci\u00f3n del pipeline"),
-                    tags$p(class="mb-0 text-muted",
-                           "Ve a la pesta\u00f1a ", tags$b("Configuraci\u00f3n"), " e introduce las rutas de la",
-                           " carpeta de entrada (con subcarpetas HI/PA/MA por familia), la carpeta de salida,",
-                           " el archivo de rangos de referencia (.xlsx) y el panel de genes (.txt).",
-                           " Ajusta los umbrales de similitud y el n\u00famero de n\u00facleos. Pulsa ",
-                           tags$b("\U0001f4be Guardar configuraci\u00f3n"), " antes de continuar.")
+                    tags$b("\u2699\ufe0f Pipeline configuration"),
+                    tags$p(class = "mb-0 text-muted",
+                           "Go to the ", tags$b("Configuration"), " tab and enter the paths for the",
+                           " input folder (with subfolders HI/PA/MA per family), the output folder,",
+                           " the reference ranges file (.xlsx) and the gene panel (.txt).",
+                           " Adjust the similarity thresholds and the number of cores. Press ",
+                           tags$b("\U0001f4be Save configuration"), " before continuing.")
                   )
               ),
               
-              # Paso 2
+              # Step 2
               div(class = "d-flex gap-3 mb-3",
                   div(class = "rounded-circle text-white d-flex align-items-center justify-content-center flex-shrink-0",
                       style = "width:32px;height:32px;background:#2C6FAC;font-weight:700;", "2"),
                   div(
-                    tags$b("\u25b6\ufe0f Ejecuci\u00f3n del an\u00e1lisis"),
-                    tags$p(class="mb-0 text-muted",
-                           "Ve a ", tags$b("Ejecuci\u00f3n"), ". Puedes lanzar la cohorte completa,",
-                           " una carpeta batch concreta o una familia individual (introduce su ID, p.\u00a0ej. ",
+                    tags$b("\u25b6\ufe0f Running the analysis"),
+                    tags$p(class = "mb-0 text-muted",
+                           "Go to ", tags$b("Execution"), ". You can launch the full cohort,",
+                           " a specific batch folder or an individual family (enter its ID, e.g. ",
                            tags$code("G06PlS056"), ").",
-                           " El log de ejecuci\u00f3n se actualiza en tiempo real.",
-                           " Usa ", tags$b("\u23f9 Detener"), " si necesitas cancelar el proceso.")
+                           " The execution log updates in real time.",
+                           " Use ", tags$b("\u23f9 Stop"), " if you need to cancel the process.")
                   )
               ),
               
-              # Paso 3
+              # Step 3
               div(class = "d-flex gap-3 mb-3",
                   div(class = "rounded-circle text-white d-flex align-items-center justify-content-center flex-shrink-0",
                       style = "width:32px;height:32px;background:#2C6FAC;font-weight:700;", "3"),
                   div(
-                    tags$b("\U0001f504 Carga de resultados"),
-                    tags$p(class="mb-0 text-muted",
-                           "En la pesta\u00f1a ", tags$b("Resultados"), ", pulsa ",
-                           tags$b("\U0001f504 Cargar / Actualizar"), " para importar todos los archivos",
-                           " ", tags$code("_Complete_Analysis.xlsx"), " encontrados en la carpeta de salida.",
-                           " La app detectar\u00e1 autom\u00e1ticamente variantes similares entre individuos (umbral configurable).")
+                    tags$b("\U0001f504 Loading results"),
+                    tags$p(class = "mb-0 text-muted",
+                           "In the ", tags$b("Results"), " tab, click ",
+                           tags$b("\U0001f504 Load / Refresh"), " to import all",
+                           " ", tags$code("_Complete_Analysis.xlsx"), " files found in the output folder.",
+                           " The app will automatically detect similar variants across individuals (configurable threshold).")
                   )
               ),
               
-              # Paso 4
+              # Step 4
               div(class = "d-flex gap-3 mb-3",
                   div(class = "rounded-circle text-white d-flex align-items-center justify-content-center flex-shrink-0",
                       style = "width:32px;height:32px;background:#2C6FAC;font-weight:700;", "4"),
                   div(
-                    tags$b("\U0001f50d Filtrado y revisi\u00f3n"),
-                    tags$p(class="mb-0 text-muted",
-                           "Filtra por modalidad (CNV/SV), herencia, tipo de rango, score AnnotSV, presencia en panel de genes,",
-                           " gen, clasificaci\u00f3n cl\u00ednica o Tag. Haz clic en una fila para ver el",
-                           " panel de detalle con acceso directo a FRANKLIN, ClinVar, gnomAD,",
-                           " DECIPHER, VarSome, UCSC, Ensembl y OMIM.")
+                    tags$b("\U0001f50d Filtering and review"),
+                    tags$p(class = "mb-0 text-muted",
+                           "Filter by modality (CNV/SV), inheritance, range type, AnnotSV score, gene panel membership,",
+                           " gene, clinical classification or Tag. Click a row to open the",
+                           " detail panel with direct links to FRANKLIN, ClinVar, gnomAD,",
+                           " DECIPHER, VarSome, UCSC, Ensembl and OMIM.")
                   )
               ),
               
-              # Paso 5
+              # Step 5
               div(class = "d-flex gap-3 mb-3",
                   div(class = "rounded-circle text-white d-flex align-items-center justify-content-center flex-shrink-0",
                       style = "width:32px;height:32px;background:#2C6FAC;font-weight:700;", "5"),
                   div(
-                    tags$b("\U0001f3f7\ufe0f Anotaci\u00f3n cl\u00ednica"),
-                    tags$p(class="mb-0 text-muted",
-                           "En el panel de detalle puedes: asignar una ",
-                           tags$b("clasificaci\u00f3n cl\u00ednica"),
-                           " (Ben\u00edgna / VUS / Patog\u00e9nica / En Progreso), a\u00f1adir ",
-                           tags$b("notas libres"), " (con opci\u00f3n de replicar a variantes similares),",
-                           " marcar con ", tags$b("Tag \U0001f6a9"), " para seguimiento,",
-                           " y registrar el ", tags$b("sexo del probando"), " (\u2642/\u2640).",
-                           " Todo se guarda autom\u00e1ticamente en disco.")
+                    tags$b("\U0001f3f7\ufe0f Clinical annotation"),
+                    tags$p(class = "mb-0 text-muted",
+                           "In the detail panel you can: assign a ",
+                           tags$b("clinical classification"),
+                           " (Benign / VUS / Pathogenic / In Progress), add ",
+                           tags$b("free-text notes"), " (with an option to replicate to similar variants),",
+                           " flag with ", tags$b("Tag \U0001f6a9"), " for follow-up,",
+                           " and record the ", tags$b("proband sex"), " (\u2642/\u2640).",
+                           " Everything is saved automatically to disk.")
                   )
               ),
               
-              # Paso 6
+              # Step 6
               div(class = "d-flex gap-3 mb-3",
                   div(class = "rounded-circle text-white d-flex align-items-center justify-content-center flex-shrink-0",
                       style = "width:32px;height:32px;background:#2C6FAC;font-weight:700;", "6"),
                   div(
-                    tags$b("\U0001f4ca Visualizaci\u00f3n y estad\u00edsticos"),
-                    tags$p(class="mb-0 text-muted",
-                           "Explora la cohorte en la pesta\u00f1a ", tags$b("Gr\u00e1ficos"),
-                           " (KPIs, distribuciones, heatmap cromosoma\u00d7familia, top genes, etc.).",
-                           " Usa ", tags$b("Tests Estad\u00edsticos"), " para realizar an\u00e1lisis formales",
-                           " (Wilcoxon, Kruskal-Wallis, Chi-cuadrado, Spearman, Shapiro-Wilk, burden\u2026).",
-                           " La pesta\u00f1a ", tags$b("Visualizaci\u00f3n"),
-                           " incluye ideograma hg38, comparador de familias e ideograma de genes.")
+                    tags$b("\U0001f4ca Visualisation and statistics"),
+                    tags$p(class = "mb-0 text-muted",
+                           "Explore the cohort in the ", tags$b("Graphs"),
+                           " tab (KPIs, distributions, chromosome\u00d7family heatmap, top genes, etc.).",
+                           " Use ", tags$b("Statistical Tests"), " to run formal analyses",
+                           " (Wilcoxon, Kruskal-Wallis, Chi-squared, Spearman, Shapiro-Wilk, burden\u2026).",
+                           " The ", tags$b("Visualisation"),
+                           " tab includes an hg38 ideogram, family comparator and gene ideogram.")
                   )
               ),
               
-              # Paso 7
+              # Step 7
               div(class = "d-flex gap-3",
                   div(class = "rounded-circle text-white d-flex align-items-center justify-content-center flex-shrink-0",
                       style = "width:32px;height:32px;background:#2C6FAC;font-weight:700;", "7"),
                   div(
-                    tags$b("\u2b07\ufe0f Exportaci\u00f3n"),
-                    tags$p(class="mb-0 text-muted",
-                           "Desde la pesta\u00f1a Resultados puedes descargar las variantes filtradas en formato ",
-                           tags$b("Excel (.xlsx)"), " o ", tags$b("CSV"),
-                           ". Tambi\u00e9n puedes generar un ", tags$b("informe PDF cl\u00ednico"),
-                           " por familia, que incluye variantes, anotaciones, notas y clasificaciones.")
+                    tags$b("\u2b07\ufe0f Export"),
+                    tags$p(class = "mb-0 text-muted",
+                           "From the Results tab you can download the filtered variants as ",
+                           tags$b("Excel (.xlsx)"), " or ", tags$b("CSV"),
+                           ". You can also generate a ", tags$b("clinical PDF report"),
+                           " per family, including variants, annotations, notes and classifications.")
                   )
               )
             )
           ),
           
-          # ESTRUCTURA DE CARPETAS
+          # FOLDER STRUCTURE
           card(
             class = "mt-3",
             card_header(
               class = "fw-bold dm-about-success",
-              bsicons::bs_icon("folder2-open"), " Estructura de carpetas esperada"
+              bsicons::bs_icon("folder2-open"), " Expected folder structure"
             ),
             card_body(
               class = "p-3",
               tags$pre(
                 class = "p-3 rounded small",
-                class = "dm-about-code p-2 rounded", style="font-size:0.82em; line-height:1.6;",
-                "Carpeta de entrada/\n",
+                class = "dm-about-code p-2 rounded", style = "font-size:0.82em; line-height:1.6;",
+                "Input folder/\n",
                 "\u251c\u2500\u2500 Batch_01/\n",
-                "\u2502   \u251c\u2500\u2500 G06PlS056HI/      \u2190 probando (hijo)\n",
-                "\u2502   \u251c\u2500\u2500 G06PlS056PA/      \u2190 padre\n",
-                "\u2502   \u2514\u2500\u2500 G06PlS056MA/      \u2190 madre\n",
+                "\u2502   \u251c\u2500\u2500 G06PlS056HI/      \u2190 proband (child)\n",
+                "\u2502   \u251c\u2500\u2500 G06PlS056PA/      \u2190 father\n",
+                "\u2502   \u2514\u2500\u2500 G06PlS056MA/      \u2190 mother\n",
                 "\u251c\u2500\u2500 Batch_02/\n",
                 "\u2502   \u251c\u2500\u2500 G07XY001HI/\n",
-                "\u2502   \u251c\u2500\u2500 069-070PA/        \u2190 progenitor compartido\n",
+                "\u2502   \u251c\u2500\u2500 069-070PA/        \u2190 shared parent\n",
                 "\u2502   \u2514\u2500\u2500 069-070MA/\n",
                 "...\n\n",
-                "Carpeta de salida/\n",
+                "Output folder/\n",
                 "\u251c\u2500\u2500 G06PlS056_Analisis_Completo.xlsx\n",
                 "\u251c\u2500\u2500 G07XY001_Analisis_Completo.xlsx\n",
                 "\u251c\u2500\u2500 .flags_variantes.rds\n",
@@ -1295,38 +1295,38 @@ ui <- page_navbar(
                 "\u251c\u2500\u2500 .clasificaciones_variantes.rds\n",
                 "\u2514\u2500\u2500 .sexos_familias.rds"
               ),
-              tags$small(class="text-muted",
-                         "Los archivos ocultos (", tags$code(".rds"), ") contienen las anotaciones cl\u00ednicas ",
-                         "y se cargan autom\u00e1ticamente junto con los resultados.")
+              tags$small(class = "text-muted",
+                         "Hidden files (", tags$code(".rds"), ") contain clinical annotations ",
+                         "and are loaded automatically alongside the results.")
             )
           )
         ),
         
-        # ── Right column: legends and technical reference ──────────────────
+        # ── Right column: legends and technical reference ────────────────────
         div(
           
-          # LEYENDA HERENCIA
+          # INHERITANCE LEGEND
           card(
             card_header(
               class = "fw-bold dm-about-warn",
-              bsicons::bs_icon("diagram-2"), " Leyenda: Tipo de herencia"
+              bsicons::bs_icon("diagram-2"), " Legend: Inheritance type"
             ),
             card_body(class = "p-3",
                       lapply(list(
-                        list("#CC0000", "De novo",             "Variante ausente en ambos progenitores. Mayor relevancia cl\u00ednica."),
-                        list("#0066CC", "Paternal",             "Heredada del padre (confirmada)."),
-                        list("#CC6600", "Maternal",             "Heredada de la madre (confirmada)."),
-                        list("#6600CC", "Combined",            "Presente en ambos progenitores."),
-                        list("#4499DD", "Paternal (Probable)",  "Probablemente paterna; similitud alta pero no exacta."),
-                        list("#DD9944", "Maternal (Probable)",  "Probablemente materna; similitud alta pero no exacta."),
-                        list("#9944DD", "Combined (Probable)", "Probablemente en ambos; similitudes detectadas."),
-                        list("#6c757d", "Desconocido",         "Sin datos de progenitores o similitud insuficiente.")
+                        list("#CC0000", "De novo",              "Variant absent in both parents. Higher clinical relevance."),
+                        list("#0066CC", "Paternal",              "Inherited from father (confirmed)."),
+                        list("#CC6600", "Maternal",              "Inherited from mother (confirmed)."),
+                        list("#6600CC", "Combined",             "Present in both parents."),
+                        list("#4499DD", "Paternal (Probable)",   "Probably paternal; high but not exact similarity."),
+                        list("#DD9944", "Maternal (Probable)",   "Probably maternal; high but not exact similarity."),
+                        list("#9944DD", "Combined (Probable)",  "Probably in both; similarities detected."),
+                        list("#6c757d", "Unknown",          "No parental data or insufficient similarity.")
                       ), function(x) {
                         div(class = "d-flex align-items-start gap-2 mb-2",
-                            div(style = paste0("width:14px;height:14px;border-radius:3px;background:",x[[1]],
+                            div(style = paste0("width:14px;height:14px;border-radius:3px;background:", x[[1]],
                                                ";flex-shrink:0;margin-top:3px;")),
                             div(tags$b(x[[2]]), tags$br(),
-                                tags$span(class="text-muted", style="font-size:0.82em;", x[[3]]))
+                                tags$span(class = "text-muted", style = "font-size:0.82em;", x[[3]]))
                         )
                       })
             )
@@ -1337,67 +1337,67 @@ ui <- page_navbar(
             class = "mt-3",
             card_header(
               class = "fw-bold dm-about-success",
-              bsicons::bs_icon("bullseye"), " Leyenda: Tipo de rango y clasificaci\u00f3n"
+              bsicons::bs_icon("bullseye"), " Legend: Range type and classification"
             ),
             card_body(class = "p-3",
-                      tags$b("Tipo de rango"),
-                      tags$hr(class="my-1"),
+                      tags$b("Range type"),
+                      tags$hr(class = "my-1"),
                       lapply(list(
-                        list("#155724", "Strict", "La variante solapa completamente con un rango de referencia."),
-                        list("#856404", "Wide",   "La variante solapa parcialmente (supera el umbral Jaccard)."),
-                        list("#9C0006", "Outside",    "Sin solapamiento significativo con ning\u00fan rango de referencia.")
+                        list("#155724", "Strict",  "The variant fully overlaps a reference range."),
+                        list("#856404", "Wide",    "The variant partially overlaps (exceeds the Jaccard threshold)."),
+                        list("#9C0006", "Outside", "No significant overlap with any reference range.")
                       ), function(x) {
-                        div(class="d-flex align-items-start gap-2 mb-2",
-                            div(style=paste0("width:14px;height:14px;border-radius:3px;background:",x[[1]],";flex-shrink:0;margin-top:3px;")),
-                            div(tags$b(x[[2]]),tags$br(),
-                                tags$span(class="text-muted",style="font-size:0.82em;",x[[3]]))
+                        div(class = "d-flex align-items-start gap-2 mb-2",
+                            div(style = paste0("width:14px;height:14px;border-radius:3px;background:", x[[1]], ";flex-shrink:0;margin-top:3px;")),
+                            div(tags$b(x[[2]]), tags$br(),
+                                tags$span(class = "text-muted", style = "font-size:0.82em;", x[[3]]))
                         )
                       }),
-                      tags$b(class="mt-2 d-block","Clasificaci\u00f3n cl\u00ednica"),
-                      tags$hr(class="my-1"),
+                      tags$b(class = "mt-2 d-block", "Clinical classification"),
+                      tags$hr(class = "my-1"),
                       lapply(list(
-                        list("#27AE60", "\U0001f7e2 Ben\u00edgna",      "Sin relevancia cl\u00ednica aparente."),
-                        list("#95A5A6", "\u2b1c VUS",            "Variante de significado incierto."),
-                        list("#E74C3C", "\U0001f534 Patog\u00e9nica", "Relevancia cl\u00ednica confirmada o altamente probable."),
-                        list("#8E44AD", "\U0001f7e3 En Progreso",  "Bajo revisi\u00f3n o pendiente de datos adicionales.")
+                        list("#27AE60", "\U0001f7e2 Benign",       "No apparent clinical relevance."),
+                        list("#95A5A6", "\u2b1c VUS",              "Variant of uncertain significance."),
+                        list("#E74C3C", "\U0001f534 Pathogenic",    "Confirmed or highly probable clinical relevance."),
+                        list("#8E44AD", "\U0001f7e3 In Progress",   "Under review or pending additional data.")
                       ), function(x) {
-                        div(class="d-flex align-items-start gap-2 mb-2",
-                            div(style=paste0("width:14px;height:14px;border-radius:3px;background:",x[[1]],";flex-shrink:0;margin-top:3px;")),
-                            div(tags$b(x[[2]]),tags$br(),
-                                tags$span(class="text-muted",style="font-size:0.82em;",x[[3]]))
+                        div(class = "d-flex align-items-start gap-2 mb-2",
+                            div(style = paste0("width:14px;height:14px;border-radius:3px;background:", x[[1]], ";flex-shrink:0;margin-top:3px;")),
+                            div(tags$b(x[[2]]), tags$br(),
+                                tags$span(class = "text-muted", style = "font-size:0.82em;", x[[3]]))
                         )
                       })
             )
           ),
           
-          # COLUMNAS CLAVE
+          # KEY COLUMNS
           card(
             class = "mt-3",
             card_header(
               class = "fw-bold dm-about-purple",
-              bsicons::bs_icon("table"), " Columnas clave de resultados"
+              bsicons::bs_icon("table"), " Key columns in Results"
             ),
-            card_body(class="p-3",
-                      style="font-size:0.83em;",
+            card_body(class = "p-3",
+                      style = "font-size:0.83em;",
                       tags$table(
-                        class="table table-sm table-hover",
-                        style="margin-bottom:0;",
-                        tags$thead(tags$tr(tags$th("Columna"),tags$th("Descripci\u00f3n"))),
+                        class = "table table-sm table-hover",
+                        style = "margin-bottom:0;",
+                        tags$thead(tags$tr(tags$th("Column"), tags$th("Description"))),
                         tags$tbody(
-                          tags$tr(tags$td(tags$code("SV_chrom/start/end")),tags$td("Coordenadas gen\u00f3micas (hg38)")),
-                          tags$tr(tags$td(tags$code("SV_length")),tags$td("Tama\u00f1o de la variante en pares de bases")),
-                          tags$tr(tags$td(tags$code("SV_type")),tags$td("Tipo: DEL (deleci\u00f3n), DUP (duplicaci\u00f3n), INV\u2026")),
-                          tags$tr(tags$td(tags$code("Tipo_Herencia")),tags$td("Patr\u00f3n de herencia calculado por el pipeline")),
-                          tags$tr(tags$td(tags$code("Tipo_Rango")),tags$td("Solapamiento con rangos de referencia (Estricto/Amplio/Fuera)")),
-                          tags$tr(tags$td(tags$code("AnnotSV_ranking_score")),tags$td("Score de patogenicidad AnnotSV (-2\u20132; >0.5 = probable patog\u00e9nica)")),
-                          tags$tr(tags$td(tags$code("En_Panel_Genes")),tags$td("Si alg\u00fan gen afectado pertenece al panel SFARI de genes de autismo")),
-                          tags$tr(tags$td(tags$code("Gene_name")),tags$td("Genes de OMIM anotados en la regi\u00f3n")),
-                          tags$tr(tags$td(tags$code("Referencia_Match")),tags$td("Solapamiento con la base de referencia interna")),
-                          tags$tr(tags$td(tags$code("Jaccard")),tags$td("\u00cdndice de similitud Jaccard con el rango de referencia")),
-                          tags$tr(tags$td(tags$code("Sim_MaxLen")),tags$td("M\u00e1xima similitud por longitud frente a otros individuos")),
-                          tags$tr(tags$td(tags$code("Confianza_Region")),tags$td("Nivel de confianza de la asignaci\u00f3n de rango")),
-                          tags$tr(tags$td(tags$code("Annotation_mode")),tags$td(tags$span(tags$code("full"), ": variante completa; ",
-                                                                                          tags$code("split"), ": fragmento de variante anotado por gen")))
+                          tags$tr(tags$td(tags$code("SV_chrom/start/end")), tags$td("Genomic coordinates (hg38)")),
+                          tags$tr(tags$td(tags$code("SV_length")),          tags$td("Variant size in base pairs")),
+                          tags$tr(tags$td(tags$code("SV_type")),            tags$td("Type: DEL (deletion), DUP (duplication), INV\u2026")),
+                          tags$tr(tags$td(tags$code("Tipo_Herencia")),      tags$td("Inheritance pattern calculated by the pipeline")),
+                          tags$tr(tags$td(tags$code("Tipo_Rango")),         tags$td("Overlap with reference ranges (Strict / Wide / Outside)")),
+                          tags$tr(tags$td(tags$code("AnnotSV_ranking_score")), tags$td("AnnotSV pathogenicity score (\u22122 to 2; >0.5 = probably pathogenic)")),
+                          tags$tr(tags$td(tags$code("En_Panel_Genes")),     tags$td("Whether any affected gene belongs to the SFARI autism gene panel")),
+                          tags$tr(tags$td(tags$code("Gene_name")),          tags$td("OMIM-annotated genes in the region")),
+                          tags$tr(tags$td(tags$code("Referencia_Match")),   tags$td("Overlap with the internal reference database")),
+                          tags$tr(tags$td(tags$code("Jaccard")),            tags$td("Jaccard similarity index against the reference range")),
+                          tags$tr(tags$td(tags$code("Sim_MaxLen")),         tags$td("Maximum length-based similarity against other individuals")),
+                          tags$tr(tags$td(tags$code("Confianza_Region")),   tags$td("Confidence level of the range assignment")),
+                          tags$tr(tags$td(tags$code("Annotation_mode")),    tags$td(tags$span(tags$code("full"), ": full variant; ",
+                                                                                              tags$code("split"), ": variant fragment annotated per gene")))
                         )
                       )
             )
@@ -1408,26 +1408,26 @@ ui <- page_navbar(
             class = "mt-3",
             card_header(
               class = "fw-bold dm-about-muted",
-              bsicons::bs_icon("cpu"), " Stack t\u00e9cnico"
+              bsicons::bs_icon("cpu"), " Technical stack"
             ),
-            card_body(class="p-3",
-                      div(class="d-flex flex-wrap gap-2",
+            card_body(class = "p-3",
+                      div(class = "d-flex flex-wrap gap-2",
                           lapply(c(
-                            "R \u2265 4.3","Shiny","bslib","DT","plotly","dplyr",
-                            "openxlsx","processx","GenomicRanges","AnnotSV","scales",
-                            "grid","bsicons"
+                            "R \u2265 4.3", "Shiny", "bslib", "DT", "plotly", "dplyr",
+                            "openxlsx", "processx", "GenomicRanges", "AnnotSV", "scales",
+                            "grid", "bsicons"
                           ), function(pkg) {
-                            tags$span(class="badge",
-                                      style="background:#2C6FAC; font-size:0.85em; font-weight:500;",
+                            tags$span(class = "badge",
+                                      style = "background:#2C6FAC; font-size:0.85em; font-weight:500;",
                                       pkg)
                           })
                       ),
                       hr(),
-                      tags$small(class="text-muted",
-                                 "\U0001f4cc El pipeline de an\u00e1lisis (", tags$code("FiltroB_STEA.R"),
-                                 ") se ejecuta en un proceso R separado v\u00eda ",
-                                 tags$code("processx"), ", lo que permite monitorizar el progreso en",
-                                 " tiempo real sin bloquear la interfaz."
+                      tags$small(class = "text-muted",
+                                 "\U0001f4cc The analysis pipeline (", tags$code("FiltroB_STEA.R"),
+                                 ") runs in a separate R process via ",
+                                 tags$code("processx"), ", which allows real-time progress monitoring",
+                                 " without blocking the interface."
                       )
             )
           )
@@ -1456,7 +1456,7 @@ server <- function(input, output, session) {
     proceso           = NULL,
     log_lines         = character(0),
     pipeline_activo   = FALSE,
-    resultados        = list(CNVs = NULL, SVs = NULL),
+    Results        = list(CNVs = NULL, SVs = NULL),
     config_guardada   = CONFIG_DEFAULTS,
     fila_seleccionada = NULL,
     fila_data         = NULL,
@@ -1646,14 +1646,14 @@ server <- function(input, output, session) {
     req(input$btn_validar_rutas)
     isolate({
       checks <- list(
-        list(label = "Carpeta entrada",  ok = dir.exists(input$cfg_entrada)),
-        list(label = "Carpeta salida",   ok = dir.exists(input$cfg_salida) ||
+        list(label = "Input folder",  ok = dir.exists(input$cfg_entrada)),
+        list(label = "Output folder",   ok = dir.exists(input$cfg_salida) ||
                tryCatch({ dir.create(input$cfg_salida, recursive=TRUE); TRUE }, error=function(e) FALSE)),
-        list(label = "Archivo rangos",   ok = file.exists(input$cfg_rangos)),
+        list(label = "Ranges file",   ok = file.exists(input$cfg_rangos)),
         list(label = "Gene panel",      ok = file.exists(input$cfg_panel))
       )
       tags$ul(class = "list-unstyled mt-2", lapply(checks, function(ch) {
-        tags$li(if (ch$ok) tags$span(class="text-success", "✔ ", ch$label) else tags$span(class="text-danger",  "✖ ", ch$label, " — no encontrado"))
+        tags$li(if (ch$ok) tags$span(class="text-success", "✔ ", ch$label) else tags$span(class="text-danger",  "✖ ", ch$label, " — not found"))
       }))
     })
   })
@@ -1692,13 +1692,13 @@ server <- function(input, output, session) {
           '',
           '# --- BLOQUE INYECTADO POR LA APP SHINY ---',
           paste0('id_objetivo <- "', id_buscado, '"'),
-          'cat("\\n[APP] 🔎 Filtrando para procesar solo la familia:", id_objetivo, "\\n")',
+          'cat("\\n[APP] 🔎 Filtering to process only family:", id_objetivo, "\\n")',
           'if (exists("tareas")) {',
           '  tareas <- tareas[id_familia == id_objetivo]',
           '  cat("[APP] 📋 Tasks found after filtering:", nrow(tareas), "\\n")',
           '  if(nrow(tareas) == 0) {',
           '    cat("[APP] ❌ ERROR: El ID proporcionado no se encuentra en la ruta de entrada.\\n")',
-          '    stop("ID de familia no reconocido por la estructura del script.")',
+          '    stop("Family ID not recognised by the script structure.")',
           '  }',
           '}',
           '# ------------------------------------------',
@@ -1791,7 +1791,7 @@ server <- function(input, output, session) {
       shinyjs::enable("btn_run_familia")
       shinyjs::disable("btn_stop")
       rv$log_lines <- c(rv$log_lines, paste0("\n✅ Process finished — exit code: ", proc$get_exit_status()))
-      showNotification("✅ Pipeline completado.", type = "message", duration = 5)
+      showNotification("✅ Pipeline completed.", type = "message", duration = 5)
     }
   })
   
@@ -1809,28 +1809,28 @@ server <- function(input, output, session) {
       color <- if (grepl("✅|FINALIZADO", last)) "text-success" else "text-secondary"
       tags$span(class = color, last)
     } else {
-      tags$span(class = "text-muted", "En espera")
+      tags$span(class = "text-muted", "Waiting")
     }
   })
   
-  observeEvent(input$btn_cargar_resultados, {
-    withProgress(message = "Cargando resultados...", value = 0.5, {
+  observeEvent(input$btn_cargar_Results, {
+    withProgress(message = "Loading results...", value = 0.5, {
       cfg             <- rv$config_guardada
       cfg$ruta_salida <- trimws(input$cfg_salida)
       
       if (!dir.exists(cfg$ruta_salida)) {
-        showNotification(paste0("❌ Carpeta de salida no encontrada:\n", cfg$ruta_salida), type = "error", duration = 8)
+        showNotification(paste0("❌ Output folder not found:\n", cfg$ruta_salida), type = "error", duration = 8)
         return()
       }
       
       datos <- tryCatch(
-        cargar_todos_resultados(cfg$ruta_salida),
+        cargar_todos_Results(cfg$ruta_salida),
         error = function(e) {
-          showNotification(paste0("❌ Error cargando resultados: ", e$message), type = "error", duration = 8)
+          showNotification(paste0("❌ Error loading results: ", e$message), type = "error", duration = 8)
           list(CNVs = NULL, SVs = NULL)
         }
       )
-      rv$resultados <- datos
+      rv$Results <- datos
       
       todas <- bind_rows(datos$CNVs, datos$SVs)
       if (nrow(todas) > 0) {
@@ -1843,7 +1843,7 @@ server <- function(input, output, session) {
         updateSelectizeInput(session, "filtro_familia",  choices = fams, server = TRUE)
         updateSelectizeInput(session, "comp_fam_a", choices = fams, server = TRUE)
         updateSelectizeInput(session, "comp_fam_b", choices = fams, server = TRUE)
-        updateSelectInput(session, "pdf_familia_sel", choices = c("— Selecciona familia —" = "", setNames(fams, fams)))
+        updateSelectInput(session, "pdf_familia_sel", choices = c("— Select family —" = "", setNames(fams, fams)))
         updateSelectizeInput(session, "filtro_herencia", choices = hers, server = TRUE)
         
         scores <- suppressWarnings(as.numeric(todas$AnnotSV_ranking_score))
@@ -1852,7 +1852,7 @@ server <- function(input, output, session) {
           updateSliderInput(session, "filtro_score", min = floor(min(scores) * 10) / 10, max = ceiling(max(scores) * 10) / 10, value = floor(min(scores) * 10) / 10)
       }
       
-      incProgress(0.3, message = "Detectando variantes similares...")
+      incProgress(0.3, message = "Detecting similar variants...")
       umbral <- isolate(input$cfg_umbral_strict) %||% 0.70
       res_auto <- tryCatch(
         detectar_similares_interindividuales(todas, umbral_sim = umbral, verbose = TRUE),
@@ -1885,11 +1885,11 @@ server <- function(input, output, session) {
           type = "message", duration = 8
         )
     })
-    showNotification(paste0("Cargados: ", nrow(rv$resultados$CNVs %||% data.frame()), " CNVs, ", nrow(rv$resultados$SVs  %||% data.frame()), " SVs"), type = "message", duration = 4)
+    showNotification(paste0("Cargados: ", nrow(rv$Results$CNVs %||% data.frame()), " CNVs, ", nrow(rv$Results$SVs  %||% data.frame()), " SVs"), type = "message", duration = 4)
   })
   
   datos_filtrados <- reactive({
-    datos <- rv$resultados
+    datos <- rv$Results
     if (is.null(datos$CNVs) && is.null(datos$SVs)) return(data.frame())
     
     modalidad <- input$filtro_modalidad
@@ -1963,14 +1963,14 @@ server <- function(input, output, session) {
   output$ui_tabla_info <- renderUI({
     n <- nrow(datos_filtrados())
     badge_color <- if (n == 0) "bg-secondary" else "bg-primary"
-    span(class = paste("badge", badge_color, "fs-6"), n, "variantes")
+    span(class = paste("badge", badge_color, "fs-6"), n, "variants")
   })
   
   COLS_DISPONIBLES <- c(
     "ID_Familia","SV_chrom","SV_start","SV_end","SV_length","SV_type",
     "Tipo_Herencia","Genotipo_Hijo","Tipo_Rango","AnnotSV_ranking_score",
     "En_Panel_Genes","Gene_name","Illumina_DRAGEN.exact.counts","Illumina_DRAGEN.similar.counts",
-    "Referencia_Match","Sim_MaxLen","Jaccard","Confianza_Region","Annotation_mode","Modalidad"
+    "Referencia_Match","Sim_MaxLen","Jaccard","Confianza_Region","Annotation_mode","Modality"
   )
   COLS_DEFAULT <- c(
     "ID_Familia","SV_chrom","SV_start","SV_end","SV_length","SV_type",
@@ -1985,19 +1985,19 @@ server <- function(input, output, session) {
     sel <- input$sel_columnas
     if (length(sel) > 0) {
       cols_usuario(sel)
-      showNotification("✅ Columnas actualizadas.", type="message", duration=2)
+      showNotification("✅ Columns updated.", type="message", duration=2)
     }
   })
   
   observeEvent(input$btn_reset_columnas, {
     cols_usuario(COLS_DEFAULT)
     updateCheckboxGroupInput(session, "sel_columnas", selected=COLS_DEFAULT)
-    showNotification("Columnas restauradas a valores por defecto.", type="message", duration=2)
+    showNotification("Columns restored to defaults.", type="message", duration=2)
   })
   
   output$tabla_variantes <- renderDT({
     df <- datos_filtrados()
-    if (nrow(df) == 0) return(datatable(data.frame(Mensaje = "Sin variantes con los filtros actuales"), options = list(dom = "t"), rownames = FALSE))
+    if (nrow(df) == 0) return(datatable(data.frame(Mensaje = "No variants with current filters"), options = list(dom = "t"), rownames = FALSE))
     
     archivo_col <- if ("._archivo_" %in% names(df)) df$`._archivo_` else rep(NA, nrow(df))
     cols_vis <- intersect(cols_usuario(), names(df))
@@ -2084,7 +2084,7 @@ server <- function(input, output, session) {
       ), class = "table table-hover table-sm"
     ) |>
       formatStyle("Tipo_Herencia", valueColumns = "Herencia_Limpia", 
-                  backgroundColor = styleEqual(c("De novo","Paternal","Maternal","Combined","Paternal (Probable)","Maternal (Probable)","Combined (Probable)","Desconocido"), bg_her), 
+                  backgroundColor = styleEqual(c("De novo","Paternal","Maternal","Combined","Paternal (Probable)","Maternal (Probable)","Combined (Probable)","Unknown"), bg_her), 
                   color = txt_color, fontWeight = styleEqual("De novo", "bold")) |>
       formatStyle("Tipo_Rango", 
                   backgroundColor = styleEqual(c("Strict","Wide","Outside"), bg_ran), 
@@ -2130,7 +2130,7 @@ server <- function(input, output, session) {
         card_header(
           class = "bg-light d-flex align-items-center gap-2",
           style = "font-size:0.9em;",
-          bsicons::bs_icon("info-circle"), " Detalle de variante seleccionada"
+          bsicons::bs_icon("info-circle"), " Selected variant detail"
         ),
         card_body(
           class = "p-2",
@@ -2155,7 +2155,7 @@ server <- function(input, output, session) {
       end <- as.character(fd$SV_end[1])
       sty <- toupper(trimws(as.character(fd$SV_type[1])))
       
-      modalidad_fila <- if ("Modalidad" %in% names(fd)) as.character(fd$Modalidad[1]) else "SV"
+      modalidad_fila <- if ("Modality" %in% names(fd)) as.character(fd$Modalidad[1]) else "SV"
       ruta_tsv_hijo  <- tryCatch(encontrar_archivo_hijo(isolate(input$cfg_entrada), archivo, as.character(fd$ID_Familia[1]), modalidad_fila), error = function(e) NA_character_)
       if (!is.na(ruta_tsv_hijo) && file.exists(ruta_tsv_hijo)) {
         hijo_btn <- actionButton("btn_abrir_hijo", "👫 Open proband TSV", class = "btn-outline-primary btn-sm", style = "font-weight:600;")
@@ -2293,8 +2293,8 @@ server <- function(input, output, session) {
       if (es_manual || es_auto_f) {
         todas_df <- tryCatch({
           bind_rows(
-            if (!is.null(rv$resultados$CNVs)) mutate(rv$resultados$CNVs, Modalidad = "CNV") else data.frame(),
-            if (!is.null(rv$resultados$SVs))  mutate(rv$resultados$SVs,  Modalidad = "SV")  else data.frame()
+            if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modalidad = "CNV") else data.frame(),
+            if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modalidad = "SV")  else data.frame()
           )
         }, error = function(e) data.frame())
         umbral_f <- isolate(input$cfg_umbral_strict) %||% 0.70
@@ -2307,10 +2307,10 @@ server <- function(input, output, session) {
         else character(0)
         tipo_tag <- if (es_manual && es_auto_f) "🚩🟢 Manually flagged and similar across individuals"
         else if (es_manual) "🚩 Manually flagged"
-        else "🟢 Similar entre individuos (auto)"
+        else "🟢 Similar across individuals (auto)"
         sim_texto <- if (length(fams_sim) > 0)
-          tags$span(class = "ms-2", tags$b(paste0(length(sim_claves), " variante(s) similar(es) en: ")), paste(fams_sim, collapse = ", "))
-        else tags$span(class = "ms-2 text-muted fst-italic", "sin coincidencias con otros individuos")
+          tags$span(class = "ms-2", tags$b(paste0(length(sim_claves), " similar variant(s) in: ")), paste(fams_sim, collapse = ", "))
+        else tags$span(class = "ms-2 text-muted fst-italic", "no matches with other individuals")
         tag_extra_class <- if (es_manual) "dm-tag-manual" else "dm-tag-auto"
         info_Tag <- div(
           class = paste("mt-2 px-2 py-1 rounded small d-flex align-items-start flex-wrap gap-1", tag_extra_class),
@@ -2351,11 +2351,11 @@ server <- function(input, output, session) {
           inputId  = "clasif_detalle_select",
           label    = NULL,
           choices  = c(
-            "— Sin clasificar" = "",
-            "🟢 Benigna"    = "Benign",
+            "— Unclassified" = "",
+            "🟢 Benign"    = "Benign",
             "⬜ VUS"            = "VUS",
             "🔴 Pathogenic" = "Pathogenic",
-            "🟣 En Progreso" = "In Progress"
+            "🟣 In Progress" = "In Progress"
           ),
           selected = val_clasif,
           width    = "100%"
@@ -2400,7 +2400,7 @@ server <- function(input, output, session) {
               tags$span(
                 class = "dm-preview-nt-e",
                 style = "font-size:0.75em; font-weight:400; font-style:italic; border-radius:4px; padding:1px 7px; vertical-align:middle; border:1px dashed;",
-                "sin anotar"
+                "unannotated"
               )
           ),
           div(
@@ -2444,7 +2444,7 @@ server <- function(input, output, session) {
     tagList(
       div(class = "d-flex align-items-center flex-wrap gap-2 mb-1",
           div(class = "d-flex align-items-center gap-2",
-              tags$span(class = "text-muted small", "Variante en: ", tags$b(if (!is.na(archivo)) basename(archivo) else "—")),
+              tags$span(class = "text-muted small", "Variant in: ", tags$b(if (!is.na(archivo)) basename(archivo) else "—")),
               if (!is.na(archivo)) actionButton("btn_abrir_excel_sel", "📂 Open Excel", class = "btn-warning btn-sm",
                                                 title = if (file.exists(archivo)) archivo else paste0("⚠ File not found: ", basename(archivo))),
               hijo_btn),
@@ -2454,7 +2454,7 @@ server <- function(input, output, session) {
       div(class = "d-flex align-items-center gap-2 px-2 py-1 rounded mb-1",
           class = "dm-clasif-panel rounded px-2 py-1",
           tags$span(class = "text-muted small",
-                    tags$b("Sexo:"),
+                    tags$b("Sex:"),
                     if (!is.null(fam_sel_det)) tags$span(class = "ms-1 text-secondary", paste0("(", fam_sel_det, ")"))
           ),
           btn_varon, btn_mujer,
@@ -2484,7 +2484,7 @@ server <- function(input, output, session) {
               if (tiene_fenotipo)
                 tags$span(class = "dm-preview-ft", style = "display:inline-block; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.75em; font-weight:400; border-radius:4px; padding:1px 7px; vertical-align:middle; border:1px solid;", preview_ft)
               else
-                tags$span(class = "dm-preview-ft-e", style = "font-size:0.75em; font-weight:400; font-style:italic; border-radius:4px; padding:1px 7px; vertical-align:middle; border:1px dashed;", "sin registrar")
+                tags$span(class = "dm-preview-ft-e", style = "font-size:0.75em; font-weight:400; font-style:italic; border-radius:4px; padding:1px 7px; vertical-align:middle; border:1px dashed;", "not recorded")
             ),
             div(
               class = "dm-fenotipo-panel rounded mt-2 px-2 py-2",
@@ -2494,17 +2494,17 @@ server <- function(input, output, session) {
                     id          = "input_fenotipo_familia",
                     class       = "form-control form-control-sm dm-fenotipo-input", 
                     style       = "min-height:80px; font-size:0.85em; resize:vertical;",
-                    placeholder = paste0("Describe el fenotipo del probando de la familia ", fam_sel_det, "...\nEj: TEA nivel 2, discapacidad intelectual leve, epilepsia, dismorfias faciales"),
+                    placeholder = paste0("Describe the phenotype of the proband from family ", fam_sel_det, "...\nE.g.: ASD level 2, mild intellectual disability, epilepsy, facial dysmorphia"),
                     fenotipo_actual
                   ),
                   div(
                     class = "d-flex gap-2 mt-1 align-items-center",
-                    actionButton("btn_guardar_fenotipo", "💾 Guardar fenotipo", class = "btn-sm", style = "background:#6C3483; color:white; border-color:#6C3483;"),
+                    actionButton("btn_guardar_fenotipo", "💾 Save phenotype", class = "btn-sm", style = "background:#6C3483; color:white; border-color:#6C3483;"),
                     if (tiene_fenotipo) actionButton("btn_borrar_fenotipo", "🗑 Delete", class = "btn-outline-danger btn-sm")
                   )
                 )
               } else {
-                tags$span(class = "text-muted small fst-italic", "Selecciona una variante para registrar el fenotipo de su familia.")
+                tags$span(class = "text-muted small fst-italic", "Select a variant to record its family's phenotype.")
               }
             )
           )
@@ -2535,7 +2535,7 @@ server <- function(input, output, session) {
       ts = format(Sys.time(), "%Y-%m-%d %H:%M:%S"), tipo = "📝 Note saved", clave = clave,
       detalle = paste0(nchar(trimws(texto)), " caracteres")
     )))
-    showNotification("💾 Nota guardada.", type = "message", duration = 2)
+    showNotification("💾 Note saved.", type = "message", duration = 2)
   })
   
   # ── Guardar y replicar nota a variantes similares ─────────────────────────
@@ -2549,8 +2549,8 @@ server <- function(input, output, session) {
     
     todas_df <- tryCatch({
       bind_rows(
-        if (!is.null(rv$resultados$CNVs)) mutate(rv$resultados$CNVs, Modalidad = "CNV") else data.frame(),
-        if (!is.null(rv$resultados$SVs))  mutate(rv$resultados$SVs,  Modalidad = "SV")  else data.frame()
+        if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modalidad = "CNV") else data.frame(),
+        if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modalidad = "SV")  else data.frame()
       )
     }, error = function(e) data.frame())
     umbral <- isolate(input$cfg_umbral_strict) %||% 0.70
@@ -2563,10 +2563,10 @@ server <- function(input, output, session) {
     }
     rv$historial <- c(rv$historial, list(list(
       ts = format(Sys.time(), "%Y-%m-%d %H:%M:%S"), tipo = "📝 Note replicated", clave = clave,
-      detalle = paste0("replicada a ", n_rep, " variante(s)")
+      detalle = paste0("replicated to ", n_rep, " variant(s)")
     )))
     msg <- if (n_rep > 0)
-      paste0("💾 Nota guardada y replicada a ", n_rep, " variante(s) similar(es).")
+      paste0("💾 Note saved and replicated to ", n_rep, " similar variant(s).")
     else
       "💾 Nota guardada. No se encontraron variantes similares a las que replicar."
     showNotification(msg, type = "message", duration = 4)
@@ -2650,7 +2650,7 @@ server <- function(input, output, session) {
   
   observeEvent(input$btn_abrir_excel_sel, {
     req(rv$fila_seleccionada)
-    if (!abrir_archivo_nativo(rv$fila_seleccionada)) showNotification("No se pudo abrir el archivo.", type = "error")
+    if (!abrir_archivo_nativo(rv$fila_seleccionada)) showNotification("Could not open the file.", type = "error")
   })
   
   # ---- Sexo del probando ------------------------------------------------
@@ -2680,12 +2680,12 @@ server <- function(input, output, session) {
   observeEvent(input$btn_abrir_hijo, {
     req(rv$fila_data)
     fd <- rv$fila_data
-    modalidad_fila <- if ("Modalidad" %in% names(fd)) as.character(fd$Modalidad[1]) else "SV"
+    modalidad_fila <- if ("Modality" %in% names(fd)) as.character(fd$Modalidad[1]) else "SV"
     ruta_tsv <- tryCatch(encontrar_archivo_hijo(input$cfg_entrada, rv$fila_seleccionada, as.character(fd$ID_Familia[1]), modalidad_fila), error = function(e) NA_character_)
     if (is.na(ruta_tsv) || !file.exists(ruta_tsv)) {
       showNotification(paste0("❌ Proband TSV not found for family ", fd$ID_Familia[1], "."), type = "error", duration = 6)
     } else {
-      if (!abrir_archivo_nativo(ruta_tsv)) showNotification("No se pudo abrir el archivo TSV.", type = "error")
+      if (!abrir_archivo_nativo(ruta_tsv)) showNotification("Could not open the TSV file.", type = "error")
     }
   })
   
@@ -2703,8 +2703,8 @@ server <- function(input, output, session) {
       rv$flags <- union(rv$flags, clave)
       todas_df <- tryCatch({
         bind_rows(
-          if (!is.null(rv$resultados$CNVs)) mutate(rv$resultados$CNVs, Modalidad = "CNV") else data.frame(),
-          if (!is.null(rv$resultados$SVs))  mutate(rv$resultados$SVs,  Modalidad = "SV")  else data.frame()
+          if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modalidad = "CNV") else data.frame(),
+          if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modalidad = "SV")  else data.frame()
         )
       }, error = function(e) data.frame())
       umbral <- isolate(input$cfg_umbral_strict) %||% 0.70
@@ -2821,31 +2821,31 @@ server <- function(input, output, session) {
   output$btn_pdf_familia <- downloadHandler(
     filename = function() {
       fam <- input$pdf_familia_sel
-      if (!nzchar(fam)) fam <- "familia"
+      if (!nzchar(fam)) fam <- "family"
       paste0("informe_", gsub("[^A-Za-z0-9_-]", "_", fam), "_", Sys.Date(), ".pdf")
     },
     content = function(file) {
       fam <- input$pdf_familia_sel
       
       if (!nzchar(fam)) {
-        showNotification("Selecciona una familia antes de generar el informe.", type = "warning", duration = 4)
+        showNotification("Select a family before generating the report.", type = "warning", duration = 4)
         grDevices::pdf(file, width = 11.69, height = 8.27)
-        grid::grid.text("Sin familia seleccionada.", x = 0.5, y = 0.5, gp = grid::gpar(fontsize = 14))
+        grid::grid.text("No family selected.", x = 0.5, y = 0.5, gp = grid::gpar(fontsize = 14))
         grDevices::dev.off()
         return(invisible(NULL))
       }
       
       todas_df <- tryCatch({
         bind_rows(
-          if (!is.null(rv$resultados$CNVs)) mutate(rv$resultados$CNVs, Modalidad = "CNV") else data.frame(),
-          if (!is.null(rv$resultados$SVs))  mutate(rv$resultados$SVs,  Modalidad = "SV")  else data.frame()
+          if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modalidad = "CNV") else data.frame(),
+          if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modalidad = "SV")  else data.frame()
         )
       }, error = function(e) data.frame())
       
       if (nrow(todas_df) == 0) {
-        showNotification("No hay datos cargados. Usa 'Cargar / Actualizar' primero.", type = "error", duration = 5)
+        showNotification("No data loaded. Use 'Load / Refresh' first.", type = "error", duration = 5)
         grDevices::pdf(file, width = 11.69, height = 8.27)
-        grid::grid.text("Sin datos cargados.", x = 0.5, y = 0.5, gp = grid::gpar(fontsize = 14))
+        grid::grid.text("No data loaded.", x = 0.5, y = 0.5, gp = grid::gpar(fontsize = 14))
         grDevices::dev.off()
         return(invisible(NULL))
       }
@@ -2865,7 +2865,7 @@ server <- function(input, output, session) {
       grDevices::pdf(file, width = 11.69, height = 8.27, paper = "a4r")
       on.exit(grDevices::dev.off(), add = TRUE)
       
-      withProgress(message = "Generando informe PDF…", value = 0, {
+      withProgress(message = "Generating PDF report…", value = 0, {
         tryCatch({
           
           # ── Datos de la familia ─────────────────────────────────────────────
@@ -2912,12 +2912,12 @@ server <- function(input, output, session) {
           
           # Sexo del probando
           sexo_fam <- rv$sexos[[fam]]
-          sexo_lbl <- if (is.null(sexo_fam) || !nzchar(sexo_fam)) "No registrado"
-          else if (sexo_fam == "M") "Varon (masculino)"
-          else if (sexo_fam == "F") "Mujer (femenino)"
+          sexo_lbl <- if (is.null(sexo_fam) || !nzchar(sexo_fam)) "Not recorded"
+          else if (sexo_fam == "M") "Male"
+          else if (sexo_fam == "F") "Female"
           else sexo_fam
           fenotipo_fam <- rv$fenotipos[[fam]] %||% ""
-          fenotipo_lbl <- if (nzchar(trimws(fenotipo_fam))) fenotipo_fam else "No registrado"
+          fenotipo_lbl <- if (nzchar(trimws(fenotipo_fam))) fenotipo_fam else "Not recorded"
           
           # URLs externas
           df_full$url_franklin <- paste0("https://franklin.genoox.com/clinical-db/variant/sv/chr",
@@ -2942,9 +2942,9 @@ server <- function(input, output, session) {
             "Paternal (Probable)" = "#5DADE2",
             "Maternal (Probable)" = "#F0A500",
             "Combined (Probable)"= "#A569BD",
-            "Desconocido"        = "#7F8C8D",
             "Unknown"        = "#7F8C8D",
-            "Sin datos"          = "#95A5A6"
+            "Unknown"        = "#7F8C8D",
+            "No data"          = "#95A5A6"
           )
           
           # Colores clasificacion
@@ -3030,7 +3030,7 @@ server <- function(input, output, session) {
             grid::grid.rect(x = 0, y = 0.025, width = 1, height = 0.025, just = c("left","top"),
                             gp = grid::gpar(fill = "#F8F9FA", col = NA))
             grid::grid.text(
-              paste0("CNV/SV Pipeline  |  Familia: ", fam,
+              paste0("CNV/SV Pipeline  |  Family: ", fam,
                      "  |  Generado: ", format(Sys.time(), "%d/%m/%Y %H:%M"),
                      "  |  Genoma: hg38  |  Pipeline: AnnotSV"),
               x = 0.015, y = 0.013, just = c("left","center"),
@@ -3043,7 +3043,7 @@ server <- function(input, output, session) {
           # ─────────────────────────────────────────────────────────────────────
           # PAGINA 1 — Portada + Resumen ejecutivo
           # ─────────────────────────────────────────────────────────────────────
-          incProgress(1 / (n_pasos_total + 1), detail = "Portada y resumen…")
+          incProgress(1 / (n_pasos_total + 1), detail = "Cover page and summary…")
           grid::grid.newpage()
           
           # Banda superior de portada
@@ -3053,15 +3053,15 @@ server <- function(input, output, session) {
                           just = c("left","top"), gp = grid::gpar(fill = "#F39C12", col = NA))
           
           # Main title
-          grid::grid.text("INFORME CLINICO  CNV / SV", x = 0.05, y = 0.965,
+          grid::grid.text("CLINICAL REPORT  CNV / SV", x = 0.05, y = 0.965,
                           just = c("left","top"),
                           gp = grid::gpar(fontsize = 22, fontface = "bold", col = "white"))
-          grid::grid.text("CNV/SV Pipeline  |  Analisis de variantes de numero de copia y variantes estructurales",
+          grid::grid.text("CNV/SV Pipeline  |  Copy number variant and structural variant analysis",
                           x = 0.05, y = 0.925, just = c("left","top"),
                           gp = grid::gpar(fontsize = 10, col = "#BDC3C7"))
           
           # Datos identificativos (lado derecho de cabecera)
-          grid::grid.text(paste0("ID Familia:  ", fam), x = 0.96, y = 0.968,
+          grid::grid.text(paste0("Family ID:  ", fam), x = 0.96, y = 0.968,
                           just = c("right","top"),
                           gp = grid::gpar(fontsize = 11, fontface = "bold", col = "white"))
           grid::grid.text(paste0("Sexo del probando:  ", sexo_lbl), x = 0.96, y = 0.946,
@@ -3082,14 +3082,14 @@ server <- function(input, output, session) {
           kpi_y     <- 0.815; kpi_h <- 0.105; kpi_w <- 0.148; kpi_gap <- 0.012
           kpi_left  <- 0.025
           kpi_data  <- list(
-            list(v = n_total,    t = "Total variantes",      s = "familia completa",   bg = "#2980B9"),
-            list(v = n_denovo,   t = "De novo",              s = "herencia de novo",   bg = "#C0392B"),
-            list(v = n_sfari,    t = "Panel genes",          s = "in gene panel",     bg = "#E67E22"),
-            list(v = n_patog,    t = "Patogenicas",          s = "score >= 0.5",       bg = "#922B21"),
+            list(v = n_total,    t = "Total variants",      s = "full family",   bg = "#2980B9"),
+            list(v = n_denovo,   t = "De novo",              s = "de novo inheritance",   bg = "#C0392B"),
+            list(v = n_sfari,    t = "Gene panel",          s = "in gene panel",     bg = "#E67E22"),
+            list(v = n_patog,    t = "Pathogenic",          s = "score >= 0.5",       bg = "#922B21"),
             list(v = if(!is.na(score_max)) round(score_max,3) else "--",
-                 t = "Score maximo", s = "AnnotSV ranking",  bg = "#1A5276"),
+                 t = "Maximum score", s = "AnnotSV ranking",  bg = "#1A5276"),
             list(v = paste0(n_del,"/",n_dup), t = "DEL / DUP",
-                 s = "tipo de variante",                     bg = "#117A65")
+                 s = "variant type",                     bg = "#117A65")
           )
           for (ki in seq_along(kpi_data)) {
             kpi_x <- kpi_left + (ki - 1) * (kpi_w + kpi_gap)
@@ -3104,15 +3104,15 @@ server <- function(input, output, session) {
           # ── Segunda fila de KPIs ──────────────────────────────────────────────
           kpi_y2 <- kpi_y - kpi_h - 0.01
           kpi_data2 <- list(
-            list(v = n_pospatog, t = "Potenc. patogenicas", s = "score 0 - 0.5",       bg = "#D35400"),
-            list(v = n_benign,   t = "Benignas",            s = "score < 0",           bg = "#27AE60"),
-            list(v = n_clasif,   t = "Clasificadas",        s = "con clasificacion",   bg = "#5D6D7E"),
+            list(v = n_pospatog, t = "Potentially pathogenic", s = "score 0 - 0.5",       bg = "#D35400"),
+            list(v = n_benign,   t = "Benign",            s = "score < 0",           bg = "#27AE60"),
+            list(v = n_clasif,   t = "Classified",        s = "with classification",   bg = "#5D6D7E"),
             list(v = if(!is.na(score_med)) score_med else "--",
-                 t = "Score medio", s = "AnnotSV mean",     bg = "#2471A3"),
+                 t = "Mean score", s = "AnnotSV mean",     bg = "#2471A3"),
             list(v = if(!is.na(tam_med_kb)) paste0(tam_med_kb," kb") else "--",
-                 t = "Tamano mediano", s = "variante",      bg = "#148F77"),
+                 t = "Median size", s = "variant",      bg = "#148F77"),
             list(v = n_pospatog + n_patog, t = "Score >= 0",
-                 s = "revision prioritaria",                bg = "#6C3483")
+                 s = "priority review",                bg = "#6C3483")
           )
           for (ki in seq_along(kpi_data2)) {
             kpi_x <- kpi_left + (ki - 1) * (kpi_w + kpi_gap)
@@ -3132,9 +3132,9 @@ server <- function(input, output, session) {
           n_prio  <- min(nrow(df_prio), 12)
           
           seccion_header(
-            texto    = "Variantes prioritarias (De novo | Score >= 0.3 | SFARI)",
+            texto    = "Priority variants (De novo | Score >= 0.3 | SFARI)",
             y_pos    = kpi_y2 - kpi_h - 0.022,
-            subtexto = paste0("Mostrando top ", n_prio, " of ", nrow(df_prio))
+            subtexto = paste0("Showing top ", n_prio, " of ", nrow(df_prio))
           )
           
           if (n_prio > 0) {
@@ -3177,7 +3177,7 @@ server <- function(input, output, session) {
             grid::grid.draw(tt_prio)
             grid::popViewport()
           } else {
-            grid::grid.text("No hay variantes prioritarias para esta familia.",
+            grid::grid.text("No priority variants for this family.",
                             x = 0.5, y = kpi_y2 - kpi_h - 0.13, just = c("center","center"),
                             gp = grid::gpar(fontsize = 9, col = "#888"))
           }
@@ -3187,9 +3187,9 @@ server <- function(input, output, session) {
           # ─────────────────────────────────────────────────────────────────────
           # PAGINA 2 — Tabla completa de variantes
           # ─────────────────────────────────────────────────────────────────────
-          incProgress(1 / (n_pasos_total + 1), detail = "Tabla completa de variantes…")
+          incProgress(1 / (n_pasos_total + 1), detail = "Full variant table…")
           grid::grid.newpage()
-          seccion_header("Tabla completa de variantes  —  Familia: ", y_pos = 1,
+          seccion_header("Full variant table  —  Family: ", y_pos = 1,
                          subtexto = paste0(n_total, " variantes | Ordenadas por score desc."))
           
           df_full_ord <- df_full[order(-ifelse(is.na(df_full$score_n), -99, df_full$score_n)), , drop = FALSE]
@@ -3257,8 +3257,8 @@ server <- function(input, output, session) {
           grid::popViewport()
           
           if (n_show_full < nrow(df_full_ord))
-            grid::grid.text(paste0("* Mostrando ", n_show_full, " of ", nrow(df_full_ord),
-                                   " variantes. Descarga el Excel para ver todas."),
+            grid::grid.text(paste0("* Showing ", n_show_full, " of ", nrow(df_full_ord),
+                                   " variants. Download the Excel to see all."),
                             x = 0.5, y = 0.04, just = c("center","center"),
                             gp = grid::gpar(fontsize = 7, col = "#888", fontface = "italic"))
           
@@ -3267,9 +3267,9 @@ server <- function(input, output, session) {
           # ─────────────────────────────────────────────────────────────────────
           # PAGINA 3 — Genes afectados + Herencia + Frecuencias
           # ─────────────────────────────────────────────────────────────────────
-          incProgress(1 / (n_pasos_total + 1), detail = "Genes afectados y herencia…")
+          incProgress(1 / (n_pasos_total + 1), detail = "Affected genes and inheritance…")
           grid::grid.newpage()
-          seccion_header("Genes afectados y distribucion de herencia", y_pos = 1)
+          seccion_header("Affected genes and inheritance distribution", y_pos = 1)
           
           # Tabla de genes
           if ("Gene_name" %in% names(df_full)) {
@@ -3321,10 +3321,10 @@ server <- function(input, output, session) {
                 stringsAsFactors = FALSE
               )
               
-              seccion_header("Top genes mas frecuentes", y_pos = 0.94,
+              seccion_header("Top most frequent genes", y_pos = 0.94,
                              bg = "#1A5276",
                              subtexto = paste0(length(genes_vec), " genes anotados  /  ",
-                                               length(gene_tab), " genes unicos"))
+                                               length(gene_tab), " unique genes"))
               
               row_bg_g <- ifelse(df_genes_tbl$SFARI == "\u2605", "#FFFBEA",
                                  ifelse(seq_len(nrow(df_genes_tbl)) %% 2 == 0, "#F4F6F7", "white"))
@@ -3375,9 +3375,9 @@ server <- function(input, output, session) {
               sum(df_full$en_sfari[!is.na(df_full$her_b) & df_full$her_b == h], na.rm = TRUE)
             })
             her_tab$N_SFARI <- n_sfari_her
-            names(her_tab) <- c("Herencia","N variantes","% total","Score mediano","N SFARI")
+            names(her_tab) <- c("Inheritance","N variants","% total","Score mediano","N SFARI")
             
-            seccion_header("Distribucion por herencia", y_pos = 0.94,
+            seccion_header("Inheritance distribution", y_pos = 0.94,
                            bg = "#117A65")
             
             vp_her <- grid::viewport(x = 0.475, y = 0.885, width = 0.51, height = 0.45,
@@ -3419,9 +3419,9 @@ server <- function(input, output, session) {
             df_dragen <- df_dragen[order(-ifelse(is.na(df_full$score_n),-99,df_full$score_n)),]
             df_dragen <- head(df_dragen, 20)
             
-            seccion_header("Frecuencias poblacionales DRAGEN y confianza de region",
+            seccion_header("DRAGEN population frequencies and region confidence",
                            y_pos = 0.39, bg = "#6C3483",
-                           subtexto = "DRAGEN.Ex = n exactas | DRAGEN.Sim = n similares | Ref.Match = solapamiento referencia")
+                           subtexto = "DRAGEN.Ex = n exact | DRAGEN.Sim = n similar | Ref.Match = reference overlap")
             
             vp_dr <- grid::viewport(x = 0.475, y = 0.335, width = 0.51, height = 0.32,
                                     just = c("left","top"))
@@ -3447,9 +3447,9 @@ server <- function(input, output, session) {
           # ─────────────────────────────────────────────────────────────────────
           incProgress(1 / (n_pasos_total + 1), detail = "Statistical plots…")
           grid::grid.newpage()
-          seccion_header(paste0("Graficas estadisticas  —  Familia: ", fam), y_pos = 1,
-                         subtexto = paste0(n_total, " variantes | ",
-                                           sum(!is.na(df_full$score_n)), " con score AnnotSV"))
+          seccion_header(paste0("Statistical plots  —  Family: ", fam), y_pos = 1,
+                         subtexto = paste0(n_total, " variants | ",
+                                           sum(!is.na(df_full$score_n)), " with AnnotSV score"))
           
           # Plot 1: Score distribution
           g_scores <- tryCatch({
@@ -3458,7 +3458,7 @@ server <- function(input, output, session) {
               df_sc <- data.frame(
                 score = sc,
                 categoria = cut(sc, breaks = c(-Inf, 0, 0.5, Inf),
-                                labels = c("Benigna (< 0)", "Incierta (0-0.5)", "Patogenica (>= 0.5)"),
+                                labels = c("Benign (< 0)", "Uncertain (0-0.5)", "Pathogenic (>= 0.5)"),
                                 include.lowest = TRUE)
               )
               ggplot(df_sc, aes(x = score, fill = categoria)) +
@@ -3466,12 +3466,12 @@ server <- function(input, output, session) {
                 geom_vline(xintercept = 0,   color = "#E74C3C", linetype = "dashed", linewidth = 0.8) +
                 geom_vline(xintercept = 0.5, color = "#C0392B", linetype = "dashed", linewidth = 0.8) +
                 scale_fill_manual(values = c("#3498DB","#F39C12","#C0392B"), name = "") +
-                labs(title = "Distribucion de scores AnnotSV",
-                     subtitle = paste0("n=", length(sc), " | mediana=", round(median(sc),3)),
-                     x = "Score AnnotSV", y = "N variantes") +
+                labs(title = "AnnotSV score distribution",
+                     subtitle = paste0("n=", length(sc), " | median=", round(median(sc),3)),
+                     x = "Score AnnotSV", y = "N variants") +
                 tema_pdf + theme(legend.position = "bottom")
             } else {
-              ggplot() + annotate("text",x=.5,y=.5,label="Sin scores") + tema_pdf +
+              ggplot() + annotate("text",x=.5,y=.5,label="No scores") + tema_pdf +
                 labs(title="Scores AnnotSV")
             }
           }, error = function(e) ggplot()+annotate("text",x=.5,y=.5,label="Error")+tema_pdf)
@@ -3489,11 +3489,11 @@ server <- function(input, output, session) {
                 geom_col(color = "white", linewidth = 0.3, width = 0.65) +
                 geom_text(aes(label = paste0(Freq, "\n(", pct, "%)")), vjust = -0.3, size = 2.5) +
                 scale_fill_manual(values = cols_h, guide = "none") +
-                labs(title = "Tipo de herencia",
+                labs(title = "Inheritance type",
                      subtitle = paste0(n_total, " variantes en total"),
-                     x = "", y = "N variantes") +
+                     x = "", y = "N variants") +
                 tema_pdf + theme(axis.text.x = element_text(angle = 28, hjust = 1, size = 7))
-            } else ggplot()+annotate("text",x=.5,y=.5,label="Sin datos")+tema_pdf+labs(title="Herencia")
+            } else ggplot()+annotate("text",x=.5,y=.5,label="No data")+tema_pdf+labs(title="Inheritance")
           }, error = function(e) ggplot()+annotate("text",x=.5,y=.5,label="Error")+tema_pdf)
           
           # Grafico 3: Tipo SV (DEL/DUP)
@@ -3513,10 +3513,10 @@ server <- function(input, output, session) {
                 geom_col(color = "white", width = 0.55) +
                 geom_text(aes(label = paste0(Freq,"\n(",pct,"%)")), vjust = -0.3, size = 2.8) +
                 scale_fill_manual(values = c_fill, guide = "none") +
-                labs(title = "Tipo de variante", subtitle = "DEL = delecion | DUP = duplicacion",
-                     x = "", y = "N variantes") +
+                labs(title = "Variant type", subtitle = "DEL = deletion | DUP = duplication",
+                     x = "", y = "N variants") +
                 tema_pdf
-            } else ggplot()+annotate("text",x=.5,y=.5,label="Sin datos")+tema_pdf+labs(title="Tipo SV")
+            } else ggplot()+annotate("text",x=.5,y=.5,label="No data")+tema_pdf+labs(title="Tipo SV")
           }, error = function(e) ggplot()+annotate("text",x=.5,y=.5,label="Error")+tema_pdf)
           
           # Grafico 4: Score por herencia boxplot
@@ -3532,8 +3532,8 @@ server <- function(input, output, session) {
                 scale_color_manual(values = cols_bx, guide = "none") +
                 geom_hline(yintercept = 0.5, color="#C0392B", linetype="dashed", linewidth=0.6) +
                 geom_hline(yintercept = 0,   color="#E67E22", linetype="dashed", linewidth=0.5) +
-                labs(title = "Score AnnotSV por herencia",
-                     subtitle = "Linea roja=0.5 | Linea naranja=0",
+                labs(title = "AnnotSV score by inheritance",
+                     subtitle = "Red line=0.5 | Orange line=0",
                      x = "", y = "Score") +
                 tema_pdf + theme(axis.text.x = element_text(angle = 22, hjust = 1, size = 7))
             } else {
@@ -3559,13 +3559,13 @@ server <- function(input, output, session) {
                 geom_col(color = "white", width = 0.5) +
                 geom_text(aes(label = paste0(Freq,"\n(",pct,"%)")), vjust = -0.3, size = 2.8) +
                 scale_fill_manual(values = c_f, guide = "none") +
-                labs(title = "Rango de la variante", subtitle = "Estricto > Amplio > Fuera de rango",
-                     x = "", y = "N variantes") +
+                labs(title = "Variant range", subtitle = "Strict > Wide > Outside range",
+                     x = "", y = "N variants") +
                 tema_pdf
-            } else ggplot()+annotate("text",x=.5,y=.5,label="Sin datos")+tema_pdf+labs(title="Rango")
+            } else ggplot()+annotate("text",x=.5,y=.5,label="No data")+tema_pdf+labs(title="Range")
           }, error = function(e) ggplot()+annotate("text",x=.5,y=.5,label="Error")+tema_pdf)
           
-          # Grafico 6: Ideograma
+          # Grafico 6: Ideogram
           g_ideograma <- tryCatch({
             df_id <- df_full[df_full$chr_c %in% CHR_ORDER & !is.na(df_full$sta_n) & !is.na(df_full$end_n), ]
             df_id$chr_f  <- factor(df_id$chr_c, levels = rev(CHR_ORDER))
@@ -3583,15 +3583,15 @@ server <- function(input, output, session) {
                            aes(x = sta_n, xend = sta_n + min_w, y = chr_f, yend = chr_f,
                                color = her_b),
                            linewidth = 4.5, lineend = "round", alpha = 0.88) +
-              scale_color_manual(values = her_pal, na.value = "#95A5A6", name = "Herencia") +
+              scale_color_manual(values = her_pal, na.value = "#95A5A6", name = "Inheritance") +
               scale_x_continuous(labels = function(x) paste0(round(x/1e6), "Mb")) +
-              labs(title = paste0("Ideograma cromosomico  —  ", nrow(df_id), " variantes"),
+              labs(title = paste0("Chromosomal ideogram  —  ", nrow(df_id), " variantes"),
                    subtitle = "Referencia: hg38",
-                   x = "Posicion genomica", y = "") +
+                   x = "Genomic position", y = "") +
               tema_pdf + theme(legend.position = "right", axis.text.y = element_text(size = 6.5),
                                legend.text = element_text(size = 6.5), legend.key.size = unit(0.3,"cm"))
           }, error = function(e) {
-            ggplot() + annotate("text",x=.5,y=.5,label="Error generando ideograma") + tema_pdf
+            ggplot() + annotate("text",x=.5,y=.5,label="Error generating ideogram") + tema_pdf
           })
           
           # Layout: ideograma arriba (ancho completo), 5 graficas abajo (grid 3+2)
@@ -3632,21 +3632,21 @@ server <- function(input, output, session) {
           for (i in seq_len(nrow(df_fichas))) {
             row <- df_fichas[i, ]
             incProgress(1 / (n_pasos_total + 1),
-                        detail = paste0("Variante ", i, " of ", nrow(df_fichas), "…"))
+                        detail = paste0("Variant ", i, " of ", nrow(df_fichas), "…"))
             grid::grid.newpage()
             
             # Classification and header colour
             clasif_val <- if (!is.null(row$clasificacion)) as.character(row$clasificacion) else "--"
-            cat_score  <- if (!is.na(row$score_n) && row$score_n >= 0.5)  "PATOGENICA"
-            else if (!is.na(row$score_n) && row$score_n >= 0) "POTENCIALMENTE PATOGENICA"
+            cat_score  <- if (!is.na(row$score_n) && row$score_n >= 0.5)  "PATHOGENIC"
+            else if (!is.na(row$score_n) && row$score_n >= 0) "POTENTIALLY PATHOGENIC"
             else if (!is.na(row$her_b) && row$her_b == "De novo") "DE NOVO"
-            else if (!is.na(row$en_sfari) && row$en_sfari)        "GEN SFARI"
-            else "REVISION"
+            else if (!is.na(row$en_sfari) && row$en_sfari)        "SFARI GENE"
+            else "REVIEW"
             col_cat    <- switch(cat_score,
-                                 "PATOGENICA"                 = "#922B21",
-                                 "POTENCIALMENTE PATOGENICA"  = "#D35400",
+                                 "PATHOGENIC"                 = "#922B21",
+                                 "POTENTIALLY PATHOGENIC"  = "#D35400",
                                  "DE NOVO"                    = "#C0392B",
-                                 "GEN SFARI"                  = "#E67E22",
+                                 "SFARI GENE"                  = "#E67E22",
                                  "#2C3E50")
             her_color  <- her_pal[as.character(row$her_b)]
             if (is.na(her_color)) her_color <- "#7F8C8D"
@@ -3659,7 +3659,7 @@ server <- function(input, output, session) {
                              && as.character(row$Gene_name) != "NA") as.character(row$Gene_name) else "--"
             genes_short <- if (nchar(genes_str) > 120) paste0(substr(genes_str, 1, 120), "...") else genes_str
             
-            nota_str   <- if (nchar(row$nota) > 0) row$nota else "(sin notas)"
+            nota_str   <- if (nchar(row$nota) > 0) row$nota else "(no notes)"
             nota_short <- if (nchar(nota_str) > 200) paste0(substr(nota_str, 1, 200), "...") else nota_str
             
             # ── Cabecera de ficha ──────────────────────────────────────────────
@@ -3670,16 +3670,16 @@ server <- function(input, output, session) {
             grid::grid.rect(x=0.985, y=1, width=0.015, height=0.13, just=c("left","top"),
                             gp=grid::gpar(fill=her_color, col=NA))
             
-            grid::grid.text(paste0("Variante #", i, "  |  ", cat_score),
+            grid::grid.text(paste0("Variant #", i, "  |  ", cat_score),
                             x=0.025, y=0.975, just=c("left","top"),
                             gp=grid::gpar(fontsize=15, fontface="bold", col="white"))
             grid::grid.text(paste0(region_str, "  |  ", row$len_lbl,
-                                   "  |  Familia: ", fam,
+                                   "  |  Family: ", fam,
                                    "  |  Sexo: ", sexo_lbl),
                             x=0.025, y=0.940, just=c("left","top"),
                             gp=grid::gpar(fontsize=9, col="#FDFEFE"))
             grid::grid.text(
-              paste0("Score AnnotSV: ", if(!is.na(row$score_n)) sprintf("%.4f", row$score_n) else "--",
+              paste0("AnnotSV Score: ", if(!is.na(row$score_n)) sprintf("%.4f", row$score_n) else "--",
                      "   |   Clasificacion: ", clasif_val,
                      "   |   SFARI: ", if (row$en_sfari) "Yes" else "No"),
               x=0.025, y=0.907, just=c("left","top"),
@@ -3705,20 +3705,20 @@ server <- function(input, output, session) {
             # Campos columna izquierda
             campos_izq <- list(
               list("Region (hg38)",         region_str),
-              list("Tamano",                row$len_lbl),
-              list("Tipo de variante",      if("SV_type"%in%names(row)) as.character(row$SV_type) else "--"),
-              list("Herencia",              if(!is.na(row$her_b)) row$her_b else "--"),
-              list("Tipo de Herencia (raw)",if("Tipo_Herencia"%in%names(row)) as.character(row$Tipo_Herencia) else "--"),
-              list("Rango anotacion",       if("Tipo_Rango"%in%names(row)) as.character(row$Tipo_Rango) else "--"),
+              list("Size",                row$len_lbl),
+              list("Variant type",      if("SV_type"%in%names(row)) as.character(row$SV_type) else "--"),
+              list("Inheritance",              if(!is.na(row$her_b)) row$her_b else "--"),
+              list("Inheritance type (raw)",if("Tipo_Herencia"%in%names(row)) as.character(row$Tipo_Herencia) else "--"),
+              list("Annotation range",       if("Tipo_Rango"%in%names(row)) as.character(row$Tipo_Rango) else "--"),
               list("Score AnnotSV",         if(!is.na(row$score_n)) sprintf("%.4f", row$score_n) else "--"),
-              list("Clasificacion clinica", clasif_val),
-              list("Gen SFARI",             if(row$en_sfari) "SI - en panel SFARI" else "No"),
-              list("Modalidad",             if("Modalidad"%in%names(row)) as.character(row$Modalidad) else "--"),
-              list("Fenotipo familiar",     {
+              list("Clinical classification", clasif_val),
+              list("SFARI gene",             if(row$en_sfari) "YES - in SFARI panel" else "No"),
+              list("Modality",             if("Modality"%in%names(row)) as.character(row$Modalidad) else "--"),
+              list("Family phenotype",     {
                 ft <- rv$fenotipos[[fam]] %||% ""
                 if (nzchar(trimws(ft)))
                   if (nchar(ft) > 78) paste0(substr(ft,1,76),"\u2026") else ft
-                else "No registrado"
+                else "Not recorded"
               })
             )
             
@@ -3729,16 +3729,16 @@ server <- function(input, output, session) {
             
             # Campos columna derecha
             campos_der <- list(
-              list("Genes afectados",       genes_short),
+              list("Affected genes",       genes_short),
               list("DRAGEN exact",          if("Illumina_DRAGEN.exact.counts"%in%names(row))
                 as.character(row[["Illumina_DRAGEN.exact.counts"]]) else "--"),
-              list("DRAGEN similares",      if("Illumina_DRAGEN.similar.counts"%in%names(row))
+              list("DRAGEN similar",      if("Illumina_DRAGEN.similar.counts"%in%names(row))
                 as.character(row[["Illumina_DRAGEN.similar.counts"]]) else "--"),
-              list("Referencia match",      if("Referencia_Match"%in%names(row))
+              list("Reference match",      if("Referencia_Match"%in%names(row))
                 as.character(row$Referencia_Match) else "--"),
               list("Sim MaxLen",            if("Sim_MaxLen"%in%names(row)) as.character(row$Sim_MaxLen) else "--"),
               list("Jaccard",               if("Jaccard"%in%names(row)) as.character(row$Jaccard) else "--"),
-              list("Confianza region",      if("Confianza_Region"%in%names(row)) as.character(row$Confianza_Region) else "--"),
+              list("Region confidence",      if("Confianza_Region"%in%names(row)) as.character(row$Confianza_Region) else "--"),
               list("DECIPHER",              paste0("deciphergenomics.org/browser#q/",row$chr_c,":",row$sta_n,"-",row$end_n)),
               list("Franklin",              paste0("franklin.genoox.com/  chr",row$chr_c,"-",row$sta_n)),
               list("gnomAD SV (r4)",        paste0("gnomad.broadinstitute.org/region/",row$chr_c,":",row$sta_n,"-",row$end_n)),
@@ -3756,7 +3756,7 @@ server <- function(input, output, session) {
             grid::grid.rect(x=0.025, y=nota_y, width=0.95, height=0.1,
                             just=c("left","top"),
                             gp=grid::gpar(fill="#EBF5FB", col="#2980B9", lwd=0.7))
-            grid::grid.text("Notas clinicas:", x=0.035, y=nota_y-0.01,
+            grid::grid.text("Clinical notes:", x=0.035, y=nota_y-0.01,
                             just=c("left","top"),
                             gp=grid::gpar(fontsize=8, fontface="bold", col="#2980B9"))
             grid::grid.text(nota_short, x=0.035, y=nota_y-0.035,
@@ -3913,7 +3913,7 @@ server <- function(input, output, session) {
                 motivo <- if (nzchar(trimws(err_msg))) {
                   if (nchar(err_msg) > 90) paste0(substr(err_msg, 1, 88), "\u2026") else err_msg
                 } else {
-                  "Abre la URL manualmente con el navegador"
+                  "Open the URL manually in your browser"
                 }
                 grid::grid.text(motivo, x=mx, y=my+0.01, just="center",
                                 gp=grid::gpar(fontsize=6.5, col="#BBBBBB"))
@@ -3928,13 +3928,13 @@ server <- function(input, output, session) {
               grid::grid.rect(x=0, y=1, width=1, height=0.003, just=c("left","top"),
                               gp=grid::gpar(fill="#F39C12", col=NA))
               grid::grid.text(
-                paste0("Capturas web  |  Variante #", i, "  |  ", region_str, "  |  ", row$len_lbl),
+                paste0("Web screenshots  |  Variant #", i, "  |  ", region_str, "  |  ", row$len_lbl),
                 x=0.025, y=0.967, just=c("left","top"),
                 gp=grid::gpar(fontsize=10, fontface="bold", col="white"))
               grid::grid.text(
                 paste0(subtitulo, "  |  Score: ",
                        if(!is.na(row$score_n)) sprintf("%.4f",row$score_n) else "--",
-                       "  |  Familia: ", fam, "  |  ", format(Sys.time(),"%d/%m/%Y %H:%M")),
+                       "  |  Family: ", fam, "  |  ", format(Sys.time(),"%d/%m/%Y %H:%M")),
                 x=0.025, y=0.934, just=c("left","top"),
                 gp=grid::gpar(fontsize=7.5, col="white"))
             }
@@ -4036,7 +4036,7 @@ server <- function(input, output, session) {
             # OMIM (izquierda)
             draw_shot(img_omim,
                       x=0.015, y=y_row2_c, w=pw2l, h=0.355,
-                      titulo   = paste0("OMIM — Gen: ", if(nzchar(gene1)) gene1 else "(sin gen anotado)"),
+                      titulo   = paste0("OMIM — Gen: ", if(nzchar(gene1)) gene1 else "(no annotated gene)"),
                       dominio  = "omim.org", col_tit = "#7B2D8B", err_msg = ultimo_error_webshot)
             
             # Panel tabla de URLs (derecha)
@@ -4045,7 +4045,7 @@ server <- function(input, output, session) {
                             gp=grid::gpar(fill="#F8F9FA", col="#BBBBBB", lwd=0.6))
             grid::grid.rect(x=tx, y=ty, width=tw, height=0.036, just=c("left","top"),
                             gp=grid::gpar(fill="#2C3E50", col=NA))
-            grid::grid.text("URLs completas para consulta manual",
+            grid::grid.text("Full URLs for manual reference",
                             x=tx+0.008, y=ty-0.018, just=c("left","center"),
                             gp=grid::gpar(fontsize=8, fontface="bold", col="white"))
             
@@ -4084,10 +4084,10 @@ server <- function(input, output, session) {
         }, error = function(e) {
           tryCatch({
             grid::grid.newpage()
-            grid::grid.text(paste0("Error al generar el informe:\n", conditionMessage(e)),
+            grid::grid.text(paste0("Error generating the report:\n", conditionMessage(e)),
                             x = 0.5, y = 0.5, gp = grid::gpar(fontsize = 11, col = "#C0392B"))
           }, error = function(e2) NULL)
-          showNotification(paste0("Error en informe PDF: ", conditionMessage(e)), type = "error", duration = 8)
+          showNotification(paste0("Error in PDF report: ", conditionMessage(e)), type = "error", duration = 8)
         })
       })  # withProgress
     }
@@ -4135,22 +4135,22 @@ server <- function(input, output, session) {
       length(unique(df$ID_Familia)) else 0
     div(class = "small",
         div(class = "d-flex justify-content-between py-1",
-            tags$span(class = "text-muted", "Variantes (full):"), tags$b(n_full)),
+            tags$span(class = "text-muted", "Variants (full):"), tags$b(n_full)),
         div(class = "d-flex justify-content-between py-1",
-            tags$span(class = "text-muted", "Total filas:"),      tags$b(n_tot)),
+            tags$span(class = "text-muted", "Total rows:"),      tags$b(n_tot)),
         div(class = "d-flex justify-content-between py-1",
-            tags$span(class = "text-muted", "Familias:"),         tags$b(n_fam))
+            tags$span(class = "text-muted", "Families:"),         tags$b(n_fam))
     )
   })
   
-  observeEvent(input$btn_ir_resultados, {
+  observeEvent(input$btn_ir_Results, {
     updateNavbarPage(session, "main_navbar", selected = "tab_results")
   })
   
   output$ui_est_kpis <- renderUI({
     df <- est_datos()
     if (nrow(df) == 0)
-      return(div(class="alert alert-warning", "\u26a0 Sin datos. Carga resultados primero."))
+      return(div(class="alert alert-warning", "\u26a0 Sin datos. Carga Results primero."))
     n_var    <- nrow(df)
     n_fam    <- length(unique(as.character(df$ID_Familia)))
     n_denovo <- sum(!is.na(df$her_limpia) & df$her_limpia == "De novo")
@@ -4179,20 +4179,20 @@ server <- function(input, output, session) {
       layout_columns(col_widths=rep(2,6),
                      kpi("\U0001f9ec","Variantes",     format(n_var,big.mark="."),"#2C6FAC"),
                      kpi("\U0001f46a","Familias",      format(n_fam,big.mark="."),"#27AE60"),
-                     kpi("\u26a1","De novo",           paste0(n_denovo," (",pct_dn,"%)"), "#CC0000","del total"),
-                     kpi("\u2b50","Con gen SFARI",
+                     kpi("\u26a1","De novo",           paste0(n_denovo," (",pct_dn,"%)"), "#CC0000","of total"),
+                     kpi("\u2b50","With SFARI gene",
                          if(is.na(pct_sfar)) "\u2014" else paste0(n_sfari," (",pct_sfar,"%)"),
                          "#E67E22","in gene panel"),
-                     kpi("\U0001f4ca","Score medio",   sc_med_s,"#8E44AD","AnnotSV score"),
-                     kpi("\U0001f4cf","Tam. mediano",  paste0(tam_med," Kb"),"#16A085","variante")
+                     kpi("\U0001f4ca","Mean score",   sc_med_s,"#8E44AD","AnnotSV score"),
+                     kpi("\U0001f4cf","Tam. mediano",  paste0(tam_med," Kb"),"#16A085","variant")
       ),
       layout_columns(col_widths=c(4,4,4),
-                     kpi("\u2642","Varones (familias)", format(n_varones,big.mark="."), "#2980B9",
+                     kpi("\u2642","Males (families)", format(n_varones,big.mark="."), "#2980B9",
                          if(n_fam>0) paste0(round(n_varones/n_fam*100,1),"% de familias") else NULL),
-                     kpi("\u2640","Mujeres (familias)", format(n_mujeres,big.mark="."), "#C0392B",
+                     kpi("\u2640","Females (families)", format(n_mujeres,big.mark="."), "#C0392B",
                          if(n_fam>0) paste0(round(n_mujeres/n_fam*100,1),"% de familias") else NULL),
-                     kpi("\u2753","Sexo desconocido",   format(n_sex_nd,big.mark="."),  "#7F8C8D",
-                         "familias sin sexo registrado")
+                     kpi("\u2753","Unknown sex",   format(n_sex_nd,big.mark="."),  "#7F8C8D",
+                         "families without recorded sex")
       )
     )
   })
@@ -4203,7 +4203,7 @@ server <- function(input, output, session) {
     plot_ly(x=~scores, type="histogram", nbinsx=40,
             marker=list(color="#2C6FAC",line=list(color="white",width=0.5)),
             hovertemplate="Score:%{x:.3f}<br>N:%{y}<extra></extra>") |>
-      layout(xaxis=list(title="AnnotSV ranking score"), yaxis=list(title="N variantes"),
+      layout(xaxis=list(title="AnnotSV ranking score"), yaxis=list(title="N variants"),
              shapes=list(
                list(type="line",x0=0,x1=0,y0=0,y1=1,yref="paper",line=list(color="orange",dash="dash",width=1.5)),
                list(type="line",x0=0.5,x1=0.5,y0=0,y1=1,yref="paper",line=list(color="red",dash="dash",width=1.5))),
@@ -4251,7 +4251,7 @@ server <- function(input, output, session) {
     layout(fig,barmode="stack",
            xaxis=list(title="",categoryorder="array",categoryarray=unname(x_labels),
                       tickangle=-45,tickfont=list(size=9)),
-           yaxis=list(title="N variantes"),
+           yaxis=list(title="N variants"),
            legend=list(orientation="h",y=-0.35,x=0,font=list(size=10)),
            margin=list(b=110,l=50,r=10,t=10),plot_bgcolor="#FAFAFA",paper_bgcolor="#FFFFFF")
   })
@@ -4286,8 +4286,8 @@ server <- function(input, output, session) {
                        hovertemplate=paste0("<b>",tp,"</b><br>chr%{x}<br>%{y}<extra></extra>"))
     }
     layout(fig,barmode="stack",
-           xaxis=list(title="Cromosoma",categoryorder="array",categoryarray=CHR_ORDER,tickfont=list(size=10)),
-           yaxis=list(title="N variantes"),legend=list(orientation="h",y=-0.25,x=0),
+           xaxis=list(title="Chromosome",categoryorder="array",categoryarray=CHR_ORDER,tickfont=list(size=10)),
+           yaxis=list(title="N variants"),legend=list(orientation="h",y=-0.25,x=0),
            margin=list(b=60,l=50,r=10,t=10),plot_bgcolor="#FAFAFA",paper_bgcolor="#FFFFFF")
   })
   
@@ -4301,7 +4301,7 @@ server <- function(input, output, session) {
     for (k in seq_len(nrow(conteo))) mat[conteo$ID_Familia[k],conteo$chr_clean[k]] <- conteo$n[k]
     plot_ly(z=mat,x=paste0("chr",chrs),y=fams,type="heatmap",
             colorscale=list(c(0,"#FFFFFF"),c(0.01,"#D6EAF8"),c(0.5,"#2C6FAC"),c(1,"#1A2980")),
-            hovertemplate="Familia:<b>%{y}</b><br>%{x}<br>N:<b>%{z}</b><extra></extra>") |>
+            hovertemplate="Family:<b>%{y}</b><br>%{x}<br>N:<b>%{z}</b><extra></extra>") |>
       layout(xaxis=list(title="",tickfont=list(size=9),tickangle=-45),
              yaxis=list(title="",tickfont=list(size=9),autorange="reversed"),
              margin=list(b=80,l=90,r=20,t=10),paper_bgcolor="#FFFFFF")
@@ -4321,7 +4321,7 @@ server <- function(input, output, session) {
     layout(fig,barmode="overlay",
            xaxis=list(title="Size (log10 Kb)",tickvals=c(-2,-1,0,1,2,3),
                       ticktext=c("10pb","100pb","1Kb","10Kb","100Kb","1Mb")),
-           yaxis=list(title="N variantes"),legend=list(orientation="h",y=-0.2,x=0),
+           yaxis=list(title="N variants"),legend=list(orientation="h",y=-0.2,x=0),
            margin=list(b=60,l=50,r=10,t=10),plot_bgcolor="#FAFAFA",paper_bgcolor="#FFFFFF")
   })
   
@@ -4355,14 +4355,14 @@ server <- function(input, output, session) {
       fig <- add_trace(fig,type="scatter",mode="markers",x=log10(sub$tamano_kb),y=sub$score_num,name=h,
                        marker=list(color=paste0(col,"99"),size=7,symbol=sub$sym,
                                    line=list(color=col,width=0.5)),
-                       text=paste0("Familia:",sub$ID_Familia,"<br>",h,"<br>",
+                       text=paste0("Family:",sub$ID_Familia,"<br>",h,"<br>",
                                    round(sub$tamano_kb,1)," Kb \u00b7 Score:",round(sub$score_num,3),
                                    "<br>Sexo:",ifelse(sub$sexo=="M","\u2642 Var\u00f3n",
                                                       ifelse(sub$sexo=="F","\u2640 Mujer","ND"))),
                        hovertemplate="%{text}<extra></extra>")
     }
     layout(fig,
-           xaxis=list(title="Tama\u00f1o (log10 Kb)",tickvals=c(-2,-1,0,1,2,3),
+           xaxis=list(title="Size (log10 Kb)",tickvals=c(-2,-1,0,1,2,3),
                       ticktext=c("10pb","100pb","1Kb","10Kb","100Kb","1Mb")),
            yaxis=list(title="AnnotSV score"),
            legend=list(orientation="h",y=-0.25,x=0,font=list(size=10)),
@@ -4388,7 +4388,7 @@ server <- function(input, output, session) {
     plot_ly(x=as.numeric(top),y=factor(names(top),levels=rev(names(top))),type="bar",orientation="h",
             marker=list(color=rev(col_vec),line=list(color="#FFFFFF",width=0.5)),
             hovertemplate="<b>%{y}</b><br>%{x} variantes<extra></extra>") |>
-      layout(xaxis=list(title="N variantes"),yaxis=list(title="",tickfont=list(size=10)),
+      layout(xaxis=list(title="N variants"),yaxis=list(title="",tickfont=list(size=10)),
              margin=list(l=100,b=50,r=20,t=35),
              annotations=list(list(x=1,y=1.06,xref="paper",yref="paper",showarrow=FALSE,align="right",
                                    text="<span style='color:#E74C3C'>\u25a0</span> SFARI &nbsp; <span style='color:#2C6FAC'>\u25a0</span> No SFARI",
@@ -4399,11 +4399,11 @@ server <- function(input, output, session) {
   output$est_tabla_genes <- renderDT({
     dg <- genes_agregados()
     if (is.null(dg) || nrow(dg)==0)
-      return(datatable(data.frame(Info="Sin datos"),options=list(dom="t"),rownames=FALSE))
+      return(datatable(data.frame(Info="No data"),options=list(dom="t"),rownames=FALSE))
     # filtro SFARI ya aplicado por datos_filtrados()
     req(nrow(dg)>0)
     df_show <- head(dg[,c("gen_solo","chr_clean","N_familias","N_variantes","Herencias","Score_medio","En_SFARI")],30)
-    names(df_show) <- c("Gen","Chr","Familias","Variantes","Herencias","Score medio","SFARI")
+    names(df_show) <- c("Gen","Chr","Familias","Variantes","Herencias","Mean score","SFARI")
     datatable(df_show,rownames=FALSE,
               options=list(dom="ftp",pageLength=15,scrollX=TRUE,order=list(list(3,"desc"))),
               class="table table-sm table-hover") |>
@@ -4454,7 +4454,7 @@ server <- function(input, output, session) {
   
   # ── Plots stratified by sex ─────────────────────────────────────
   SEX_COLORS <- c("M" = "#2980B9", "F" = "#C0392B", "ND" = "#95A5A6")
-  SEX_LABELS <- c("M" = "Var\u00f3n \u2642", "F" = "Mujer \u2640", "ND" = "Desconocido")
+  SEX_LABELS <- c("M" = "Var\u00f3n \u2642", "F" = "Mujer \u2640", "ND" = "Unknown")
   
   output$est_plot_sexo_pie <- renderPlotly({
     df <- est_datos(); req(nrow(df)>0, "sexo" %in% names(df))
@@ -4476,7 +4476,7 @@ server <- function(input, output, session) {
     df$her_f <- factor(her_base(df$Tipo_Herencia),
                        levels=c(her_levs, setdiff(unique(her_base(df$Tipo_Herencia)), her_levs)))
     df$sexo_lbl <- ifelse(df$sexo=="M","Var\u00f3n \u2642",
-                          ifelse(df$sexo=="F","Mujer \u2640","Desconocido"))
+                          ifelse(df$sexo=="F","Mujer \u2640","Unknown"))
     conteo <- df |> group_by(sexo_lbl, her_f) |> summarise(n=n(), .groups="drop")
     fig <- plot_ly()
     for (h in her_levs) {
@@ -4488,7 +4488,7 @@ server <- function(input, output, session) {
     }
     layout(fig, barmode="stack",
            xaxis=list(title=""),
-           yaxis=list(title="N variantes"),
+           yaxis=list(title="N variants"),
            legend=list(orientation="h",y=-0.35,x=0,font=list(size=10)),
            margin=list(b=110,l=50,r=10,t=10), plot_bgcolor="#FAFAFA", paper_bgcolor="#FFFFFF")
   })
@@ -4523,7 +4523,7 @@ server <- function(input, output, session) {
     df <- est_datos(); req(nrow(df)>0, "sexo" %in% names(df))
     df$her_limpia2 <- her_base(df$Tipo_Herencia)
     df$sexo_lbl <- ifelse(df$sexo=="M","Var\u00f3n \u2642",
-                          ifelse(df$sexo=="F","Mujer \u2640","Desconocido"))
+                          ifelse(df$sexo=="F","Mujer \u2640","Unknown"))
     conteo <- df |>
       filter(!is.na(her_limpia2)) |>
       group_by(sexo_lbl, her_limpia2) |>
@@ -4538,8 +4538,8 @@ server <- function(input, output, session) {
     }
     layout(fig, barmode="stack",
            xaxis=list(title="", categoryorder="array",
-                      categoryarray=c("Var\u00f3n \u2642","Mujer \u2640","Desconocido")),
-           yaxis=list(title="N variantes"),
+                      categoryarray=c("Var\u00f3n \u2642","Mujer \u2640","Unknown")),
+           yaxis=list(title="N variants"),
            legend=list(orientation="h",y=-0.3,x=0,font=list(size=10)),
            margin=list(b=100,l=50,r=10,t=10), plot_bgcolor="#FAFAFA", paper_bgcolor="#FFFFFF")
   })
@@ -4562,8 +4562,8 @@ server <- function(input, output, session) {
       if(length(m)>1 && length(f)>1) wilcox.test(m,f)$p.value else NA
     }, error=function(e) NA)
     titulo <- if(!is.na(p_val)) paste0("Wilcoxon p=",formatC(p_val,digits=3,format="g"),
-                                       if(p_val<0.05)" *" else " ns") else "Tama\u00f1o por sexo"
-    layout(fig, yaxis=list(title="Tama\u00f1o (Kb)",type="log"), xaxis=list(title=""),
+                                       if(p_val<0.05)" *" else " ns") else "Size by sex"
+    layout(fig, yaxis=list(title="Size (Kb)",type="log"), xaxis=list(title=""),
            showlegend=TRUE,
            title=list(text=titulo, font=list(size=12,
                                              color=if(!is.na(p_val)&&p_val<0.05)"#CC0000" else "#555")),
@@ -4571,21 +4571,21 @@ server <- function(input, output, session) {
   })
   
   output$ui_badge_global <- renderUI({
-    n_cnv <- nrow(rv$resultados$CNVs %||% data.frame())
-    n_sv  <- nrow(rv$resultados$SVs  %||% data.frame())
-    if (n_cnv + n_sv == 0) return(tags$span(class="badge bg-secondary ms-2", "Sin datos cargados"))
-    tags$span(class = "badge bg-success ms-2", paste0(n_cnv, " CNVs · ", n_sv, " SVs cargados"))
+    n_cnv <- nrow(rv$Results$CNVs %||% data.frame())
+    n_sv  <- nrow(rv$Results$SVs  %||% data.frame())
+    if (n_cnv + n_sv == 0) return(tags$span(class="badge bg-secondary ms-2", "No data loaded"))
+    tags$span(class = "badge bg-success ms-2", paste0(n_cnv, " CNVs · ", n_sv, " SVs loaded"))
   })
   
   # ── Chromosomal ideogram ──────────────────────────────────────────────────
-  # ── Comparador de familias ────────────────────────────────────────────────
+  # ── Comparator de familias ────────────────────────────────────────────────
   comp_data <- eventReactive(input$btn_comparar, {
     req(nzchar(input$comp_fam_a), nzchar(input$comp_fam_b))
     fam_a  <- input$comp_fam_a
     fam_b  <- input$comp_fam_b
     mod    <- input$comp_modalidad
     umbral <- (input$comp_umbral %||% 50) / 100
-    datos  <- rv$resultados
+    datos  <- rv$Results
     
     todas <- switch(mod,
                     "CNVs"  = datos$CNVs %||% data.frame(),
@@ -4622,7 +4622,7 @@ server <- function(input, output, session) {
     df_ab$sta_num     <- sta_v
     df_ab$end_num     <- end_v
     df_ab$Compartida  <- compartida
-    df_ab$Estado      <- ifelse(compartida, "Compartida", paste0("Solo ", fam_v))
+    df_ab$Estado      <- ifelse(compartida, "Shared", paste0("Solo ", fam_v))
     df_ab$fam_v       <- fam_v
     df_ab$her_b       <- her_base(df_ab$Tipo_Herencia)
     
@@ -4657,7 +4657,7 @@ server <- function(input, output, session) {
     if (is.null(comp_data()))
       div(class="text-center text-muted py-5",
           bsicons::bs_icon("bar-chart-steps", size="2em"), br(),
-          tags$span("Selecciona dos familias y pulsa ", tags$b("Comparar familias")))
+          tags$span("Select two families and click ", tags$b("Comparar familias")))
     else NULL
   })
   
@@ -4672,7 +4672,7 @@ server <- function(input, output, session) {
             tags$small(cd$fam_b)),
         div(class="d-flex align-items-center gap-1",
             div(style="width:12px;height:12px;background:#27AE60;border-radius:2px;"),
-            tags$small("Compartida"))
+            tags$small("Shared"))
     )
   })
   
@@ -4722,9 +4722,9 @@ server <- function(input, output, session) {
                              "<b>", fam_id, "</b>  ", dfc$SV_type[j], "<br>",
                              "chr", chr, ":", format(round(dfc$sta_num[j]), big.mark=".", scientific=FALSE),
                              "–", format(round(dfc$end_num[j]), big.mark=".", scientific=FALSE), "<br>",
-                             "Herencia: ", dfc$her_b[j], "<br>",
-                             if (dfc$Compartida[j]) "<b style='color:#27AE60'>✅ Compartida con la otra familia</b>"
-                             else "Solo en esta familia"
+                             "Inheritance: ", dfc$her_b[j], "<br>",
+                             if (dfc$Compartida[j]) "<b style='color:#27AE60'>✅ Shared with the other family</b>"
+                             else "Only in this family"
                            ),
                            hovertemplate="%{text}<extra></extra>"
           )
@@ -4755,7 +4755,7 @@ server <- function(input, output, session) {
                            ticktext=paste0("chr", chrs_presentes),
                            autorange="reversed", tickfont=list(size=11)),
            legend   = list(orientation="h", y=-0.1, x=0, font=list(size=11),
-                           title=list(text="<b>Familia</b>")),
+                           title=list(text="<b>Family</b>")),
            annotations = list(
              list(x=0.02, y=1.01, xref="paper", yref="paper", showarrow=FALSE,
                   text=paste0("<b style='color:", COLOR_A, "'>▲ ", fa, "</b>  |  ",
@@ -4771,14 +4771,14 @@ server <- function(input, output, session) {
   output$tabla_comparador <- renderDT({
     cd <- comp_data()
     if (is.null(cd))
-      return(datatable(data.frame(Mensaje="Selecciona dos familias y pulsa Comparar."),
+      return(datatable(data.frame(Mensaje="Select two families and click Compare."),
                        options=list(dom="t"), rownames=FALSE))
     df  <- cd$df; fa <- cd$fam_a; fb <- cd$fam_b
     
-    df$Estado <- ifelse(df$Compartida, "✅ Compartida",
+    df$Estado <- ifelse(df$Compartida, "✅ Shared",
                         ifelse(df$fam_v == fa,
-                               paste0("🔵 Solo ", fa),
-                               paste0("🟠 Solo ", fb)))
+                               paste0("🔵 Only ", fa),
+                               paste0("🟠 Only ", fb)))
     
     cols_vis <- intersect(c("ID_Familia","Estado","SV_chrom","SV_start","SV_end",
                             "SV_length","SV_type","Tipo_Herencia","Tipo_Rango",
@@ -4799,8 +4799,8 @@ server <- function(input, output, session) {
               extensions="Scroller",
               class="table table-hover table-sm") |>
       formatStyle("Estado",
-                  backgroundColor = styleEqual(c("✅ Compartida", paste0("🔵 Solo ", fa), paste0("🟠 Solo ", fb)), bg_est),
-                  color = txt_color, fontWeight = styleEqual("✅ Compartida", "bold")) |>
+                  backgroundColor = styleEqual(c("✅ Shared", paste0("🔵 Only ", fa), paste0("🟠 Only ", fb)), bg_est),
+                  color = txt_color, fontWeight = styleEqual("✅ Shared", "bold")) |>
       formatStyle("ID_Familia",
                   color = styleEqual(c(fa, fb), c(COLOR_A, COLOR_B)),
                   fontWeight = "bold") |>
@@ -4808,7 +4808,7 @@ server <- function(input, output, session) {
                   backgroundColor = styleEqual(
                     c("De novo","Paternal","Maternal","Combined",
                       "Paternal (Probable)","Maternal (Probable)","Combined (Probable)",
-                      "Desconocido","Unknown"), bg_her),
+                      "Unknown","Unknown"), bg_her),
                   color = txt_color, fontWeight = styleEqual("De novo", "bold"))
   }, server=TRUE)
   
@@ -4824,8 +4824,8 @@ server <- function(input, output, session) {
     
     todas_df <- tryCatch({
       bind_rows(
-        if (!is.null(rv$resultados$CNVs)) mutate(rv$resultados$CNVs, Modalidad="CNV") else data.frame(),
-        if (!is.null(rv$resultados$SVs))  mutate(rv$resultados$SVs,  Modalidad="SV")  else data.frame()
+        if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modalidad="CNV") else data.frame(),
+        if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modalidad="SV")  else data.frame()
       )
     }, error = function(e) data.frame())
     if (nrow(todas_df) == 0) return(NULL)
@@ -4867,7 +4867,7 @@ server <- function(input, output, session) {
                        paste0("chr", chr_ref, ":",
                               format(round(sta_ref - margen), big.mark=".", scientific=FALSE), "–",
                               format(round(end_ref + margen), big.mark=".", scientific=FALSE),
-                              " · variante: ", len_fmt))
+                              " · variant: ", len_fmt))
           ),
           if (!is.null(genes_reg))
             div(tags$small(
@@ -4892,8 +4892,8 @@ server <- function(input, output, session) {
     
     todas_df <- tryCatch({
       bind_rows(
-        if (!is.null(rv$resultados$CNVs)) mutate(rv$resultados$CNVs, Modalidad="CNV") else data.frame(),
-        if (!is.null(rv$resultados$SVs))  mutate(rv$resultados$SVs,  Modalidad="SV")  else data.frame()
+        if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modalidad="CNV") else data.frame(),
+        if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modalidad="SV")  else data.frame()
       )
     }, error = function(e) data.frame())
     req(nrow(todas_df) > 0)
@@ -4974,7 +4974,7 @@ server <- function(input, output, session) {
                        name=her, legendgroup=her, showlegend=TRUE,
                        text=paste0(
                          "<b>", dh$fam_id, "</b>", ifelse(dh$es_ref, " ⬅ variante seleccionada", ""), "<br>",
-                         "Tipo: ", dh$sv_type, " · Herencia: ", her, "<br>",
+                         "Type: ", dh$sv_type, " · Inheritance: ", her, "<br>",
                          "chr", chr_ref, ":", format(round(dh$sta_num), big.mark=".", scientific=FALSE),
                          "–", format(round(dh$end_num), big.mark=".", scientific=FALSE), " (", len_lbl, ")<br>",
                          "Score AnnotSV: <b>", score_lbl, "</b><br>",
@@ -5009,7 +5009,7 @@ server <- function(input, output, session) {
              range=list(0.4, n_fams + 0.6)
            ),
            legend=list(orientation="h", y=-0.22, x=0, font=list(size=10),
-                       title=list(text="<b>Herencia</b>")),
+                       title=list(text="<b>Inheritance</b>")),
            annotations=annots,
            shapes=shapes_list,
            margin=list(l=90, r=15, t=10, b=65),
@@ -5033,8 +5033,8 @@ server <- function(input, output, session) {
     # Buscar la variante en todos los datos (sin filtros)
     todas_df <- tryCatch({
       bind_rows(
-        if (!is.null(rv$resultados$CNVs)) mutate(rv$resultados$CNVs, Modalidad="CNV") else data.frame(),
-        if (!is.null(rv$resultados$SVs))  mutate(rv$resultados$SVs,  Modalidad="SV")  else data.frame()
+        if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modalidad="CNV") else data.frame(),
+        if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modalidad="SV")  else data.frame()
       )
     }, error = function(e) data.frame())
     req(nrow(todas_df) > 0)
@@ -5050,7 +5050,7 @@ server <- function(input, output, session) {
                    (is.na(mode_v) | mode_v == "full"))
     
     if (length(idx) == 0) {
-      showNotification(paste0("Variante de ", click_fam, " no encontrada (puede estar oculta por filtros activos)."),
+      showNotification(paste0("Variant from ", click_fam, " no encontrada (puede estar oculta por filtros activos)."),
                        type = "warning", duration = 4)
       return()
     }
@@ -5070,7 +5070,7 @@ server <- function(input, output, session) {
       updateSelectizeInput(session, "filtro_familia", selected = character(0))
     }
     
-    # Navegar al tab Resultados — la tabla se re-renderiza y el observer de abajo
+    # Navegar al tab Results — la tabla se re-renderiza y el observer de abajo
     # seleccionara la fila cuando datos_filtrados() haya recomputado
     updateNavbarPage(session, "main_navbar", selected = "tab_results")
     
@@ -5173,7 +5173,7 @@ server <- function(input, output, session) {
     if (is.null(genes_agregados()))
       div(class="text-center text-muted py-5",
           bsicons::bs_icon("map", size="2em"), br(),
-          tags$span("Carga resultados para ver el ideograma de genes"))
+          tags$span("Load results to view the gene ideogram"))
     else NULL
   })
   
@@ -5220,15 +5220,15 @@ server <- function(input, output, session) {
                          symbol = "line-ns",
                          line   = list(color=dg_n$color_hex, width=dg_n$sz)
                        ),
-                       name          = "Gen afectado",
+                       name          = "Affected gene",
                        legendgroup   = "normal",
                        showlegend    = TRUE,
                        text = paste0(
                          "<b>", dg_n$gen_solo, "</b><br>",
                          "Familias afectadas: <b>", dg_n$N_familias, "</b><br>",
                          dg_n$Familias, "<br>",
-                         "Herencias: ", dg_n$Herencias, "<br>",
-                         "Score medio: ", dg_n$Score_medio
+                         "Inheritances: ", dg_n$Herencias, "<br>",
+                         "Mean score: ", dg_n$Score_medio
                        ),
                        hovertemplate = "%{text}<extra></extra>"
       )
@@ -5248,15 +5248,15 @@ server <- function(input, output, session) {
                          symbol = "line-ns",
                          line   = list(color=dg_s$color_hex, width=dg_s$sz + 2)
                        ),
-                       name          = "Gen SFARI",
+                       name          = "SFARI gene",
                        legendgroup   = "sfari",
                        showlegend    = TRUE,
                        text = paste0(
                          "<b>⭐ ", dg_s$gen_solo, " (panel)</b><br>",
                          "Familias afectadas: <b>", dg_s$N_familias, "</b><br>",
                          dg_s$Familias, "<br>",
-                         "Herencias: ", dg_s$Herencias, "<br>",
-                         "Score medio: ", dg_s$Score_medio
+                         "Inheritances: ", dg_s$Herencias, "<br>",
+                         "Mean score: ", dg_s$Score_medio
                        ),
                        hovertemplate = "%{text}<extra></extra>"
       )
@@ -5300,11 +5300,11 @@ server <- function(input, output, session) {
     
     if (is.null(gen_name) || is.null(dg))
       return(div(class="text-center text-muted py-4 small",
-                 bsicons::bs_icon("cursor"), br(), "Haz clic en un gen para ver el detalle"))
+                 bsicons::bs_icon("cursor"), br(), "Click a gene to view details"))
     
     gen_info <- dg[dg$gen_solo == gen_name, , drop=FALSE]
     if (nrow(gen_info) == 0)
-      return(div(class="text-center text-muted py-4 small", paste0("Gen no encontrado: ", gen_name)))
+      return(div(class="text-center text-muted py-4 small", paste0("Gene not found: ", gen_name)))
     gen_info <- gen_info[1, ]
     
     sfari_tag <- if (isTRUE(gen_info$En_SFARI))
@@ -5325,20 +5325,20 @@ server <- function(input, output, session) {
         col_widths = c(6, 6),
         div(class="dm-stat-blue rounded p-2 text-center",
             tags$div(style="font-size:1.8em; font-weight:700; color:#2C6FAC;", gen_info$N_familias),
-            tags$small("familia(s)")),
+            tags$small("family/families")),
         div(class="dm-stat-gray rounded p-2 text-center",
             tags$div(class="dm-muted-txt fw-bold", style="font-size:1.8em;", gen_info$N_variantes),
-            tags$small("variante(s)"))
+            tags$small("variant(s)"))
       ),
       div(class="mt-2 mb-1",
-          tags$b("Herencias: "),
+          tags$b("Inheritances: "),
           tags$span(class="text-muted small", gen_info$Herencias)),
       div(class="mb-2",
-          tags$b("Score medio: "),
+          tags$b("Mean score: "),
           tags$span(class="text-muted small",
                     if (is.nan(gen_info$Score_medio)) "\u2014" else as.character(gen_info$Score_medio))),
       hr(class="my-2"),
-      tags$b("Familias afectadas:", class="small"),
+      tags$b("Affected families:", class="small"),
       div(class="mt-1",
           lapply(strsplit(gen_info$Familias, ", ")[[1]], function(fam) {
             tags$span(class="badge me-1 mb-1",
@@ -5346,7 +5346,7 @@ server <- function(input, output, session) {
           })
       ),
       hr(class="my-2"),
-      tags$b("Variantes:", class="small"),
+      tags$b("Variants:", class="small"),
       div(class="mt-1",
           DTOutput("dt_gen_detalle_filas", height="280px"))
     )
@@ -5375,11 +5375,11 @@ server <- function(input, output, session) {
               options=list(dom="t", pageLength=20, scrollX=TRUE),
               class="table table-sm table-hover") |>
       formatStyle("Tipo_Herencia",
-                  backgroundColor = styleEqual(c("De novo","Paternal","Maternal","Combined","Desconocido"), bg_her),
+                  backgroundColor = styleEqual(c("De novo","Paternal","Maternal","Combined","Unknown"), bg_her),
                   color = txt_color, fontWeight = styleEqual("De novo", "bold"))
   }, server=TRUE)
   
-  # ── Historial de acciones ──────────────────────────────────────────────────
+  # ── History de acciones ──────────────────────────────────────────────────
   output$tabla_historial <- renderDT({
     hist <- rv$historial
     if (length(hist) == 0)
@@ -5402,7 +5402,7 @@ server <- function(input, output, session) {
   
   observeEvent(input$btn_limpiar_historial, {
     rv$historial <- list()
-    showNotification("Historial limpiado.", type = "warning", duration = 2)
+    showNotification("History cleared.", type = "warning", duration = 2)
   })
   
   output$plot_ideograma <- renderPlotly({
@@ -5468,7 +5468,7 @@ server <- function(input, output, session) {
                          "<b>Region:</b> chr", df_h$chr_clean, ":", format(df_h$start_num, big.mark=".", scientific=FALSE),
                          "–", format(df_h$end_num, big.mark=".", scientific=FALSE), "<br>",
                          "<b>Tipo:</b> ",      df_h$SV_type,       "<br>",
-                         "<b>Herencia:</b> ",  her,                 "<br>",
+                         "<b>Inheritance:</b> ",  her,                 "<br>",
                          "<b>Score:</b> ",     df_h$score_lbl
                        ),
                        hovertemplate = "%{text}<extra></extra>"
@@ -5491,7 +5491,7 @@ server <- function(input, output, session) {
              tickfont   = list(size = 11)
            ),
            legend = list(
-             title       = list(text = "<b>Herencia</b>"),
+             title       = list(text = "<b>Inheritance</b>"),
              orientation = "h",
              y           = -0.12,
              x           = 0,
@@ -5511,7 +5511,7 @@ server <- function(input, output, session) {
   
   # Reactive: clean dataset for tests (without Results tab filters)
   test_datos_base <- reactive({
-    datos <- rv$resultados
+    datos <- rv$Results
     if (is.null(datos$CNVs) && is.null(datos$SVs)) return(data.frame())
     cnv <- if (!is.null(datos$CNVs)) mutate(datos$CNVs, Modalidad="CNV") else data.frame()
     sv  <- if (!is.null(datos$SVs))  mutate(datos$SVs,  Modalidad="SV")  else data.frame()
@@ -5546,17 +5546,17 @@ server <- function(input, output, session) {
   )
   # Available categorical variables
   VARS_CATEG <- c(
-    "Herencia"        = "her_limpia",
-    "Tipo variante"   = "tipo_agrup",
-    "Cromosoma"       = "chr_clean",
-    "Modalidad (CNV/SV)" = "Modalidad",
-    "Gen SFARI"       = "en_sfari"
+    "Inheritance"        = "her_limpia",
+    "Variant type"   = "tipo_agrup",
+    "Chromosome"       = "chr_clean",
+    "Modalidad (CNV/SV)" = "Modality",
+    "SFARI gene"       = "en_sfari"
   )
   # Categorical variables encoded as integers (for numeric tests)
   VARS_CATEG_AS_NUM <- c(
-    "Herencia (\u2192 n\u00ba)"          = "her_limpia_num",
+    "Inheritance (\u2192 count)"          = "her_limpia_num",
     "Tipo variante (\u2192 n\u00ba)"     = "tipo_agrup_num",
-    "Cromosoma (\u2192 n\u00ba)"         = "chr_clean_num",
+    "Chromosome (\u2192 count)"         = "chr_clean_num",
     "Modalidad (\u2192 n\u00ba)"         = "Modalidad_num",
     "Gen SFARI (\u2192 n\u00ba)"         = "en_sfari_num"
   )
@@ -5578,8 +5578,8 @@ server <- function(input, output, session) {
       id     = "wiz_kruskal",   tipo  = "kruskal",
       icono  = "\U0001f4ca",   color = "#5B6CBD",
       titulo = "\u00bfDifieren varios grupos?",
-      desc   = "Compara Score o Tama\u00f1o entre todos los tipos de herencia a la vez",
-      tip    = "Generaliza Wilcoxon a 3+ grupos"
+      desc   = "Compare Score or Size across all inheritance types at once",
+      tip    = "Generalises Wilcoxon to 3+ groups"
     ),
     list(
       id     = "wiz_chisq",     tipo  = "chisq",
@@ -5607,14 +5607,14 @@ server <- function(input, output, session) {
       icono  = "\U0001f3af",   color = "#CC0000",
       titulo = "\u00bfLa proporci\u00f3n observada es la esperada?",
       desc   = "Ej: \u00bfla tasa de De novo (~15-20\u0025 en TEA) concuerda con esta cohorte?",
-      tip    = "Contrasta contra un valor de referencia"
+      tip    = "Tests against a reference value"
     ),
     list(
       id     = "wiz_shapiro",   tipo  = "shapiro",
       icono  = "\U0001f4d0",   color = "#7F8C8D",
       titulo = "\u00bfSiguen los datos una distribuci\u00f3n normal?",
       desc   = "Paso previo para saber si usar tests param\u00e9tricos (t-test) o no param\u00e9tricos (Wilcoxon)",
-      tip    = "Usar siempre antes de Pearson o ANOVA"
+      tip    = "Always use before Pearson or ANOVA"
     )
   )
   
@@ -5624,7 +5624,7 @@ server <- function(input, output, session) {
     
     if (nrow(df) == 0)
       return(div(class = "alert alert-warning small p-2 mt-1",
-                 bsicons::bs_icon("exclamation-triangle"), " Carga resultados primero."))
+                 bsicons::bs_icon("exclamation-triangle"), " Carga Results primero."))
     
     tipo_actual <- isolate(input$test_tipo) %||% "wilcoxon"
     n_vars      <- nrow(df)
@@ -5716,7 +5716,7 @@ server <- function(input, output, session) {
     tipo <- input$test_tipo
     df   <- test_datos_base()
     if (nrow(df) == 0)
-      return(div(class="alert alert-warning small", "Carga resultados primero."))
+      return(div(class="alert alert-warning small", "Load results first."))
     
     usar_categ_num <- isTRUE(input$test_categ_como_num)
     vars_num <- if (usar_categ_num) c(VARS_CONTINUAS, VARS_CATEG_AS_NUM) else VARS_CONTINUAS
@@ -5800,7 +5800,7 @@ server <- function(input, output, session) {
         selectInput("test_shap_grupo_var", "Separar por grupo (opcional)",
                     choices=c("Ninguno"="ninguno", VARS_CATEG), selected="ninguno", width="100%"),
         tags$small(class="text-muted",
-                   "Shapiro-Wilk requiere n entre 3 y 5000. Grupos con n fuera de rango se omiten.")
+                   "Shapiro-Wilk requires n between 3 and 5000. Groups with n out of range are omitted.")
       )
     } else if (tipo == "prop_binom") {
       tagList(
@@ -5861,81 +5861,81 @@ server <- function(input, output, session) {
   # ── Ayuda contextual por test ─────────────────────────────────────────────────
   AYUDAS <- list(
     wilcoxon  = list(
-      nombre = "Test de Wilcoxon-Mann-Whitney",
-      cuando = "Compara medianas de una variable continua entre dos grupos independientes sin asumir normalidad.",
+      nombre = "Wilcoxon-Mann-Whitney test",
+      cuando = "Compares medians of a continuous variable between two independent groups without assuming normality.",
       h0     = "H0: The distributions of both groups are identical (equal medians).",
       uso    = "Ideal for comparing scores or sizes across inheritances (De novo vs Paternal, DEL vs DUP...).",
-      ref    = "Mann & Whitney (1947) · No paramétrico · Alternativa al t-test de Student."
+      ref    = "Mann & Whitney (1947) · Non-parametric · Alternative to Student's t-test."
     ),
     kruskal   = list(
-      nombre = "Test de Kruskal-Wallis",
+      nombre = "Kruskal-Wallis test",
       cuando = "Generalisation of Wilcoxon for 3 or more independent groups.",
       h0     = "H0: The distributions of all groups are identical.",
       uso    = "Compare scores across all inheritance types simultaneously.",
-      ref    = "Kruskal & Wallis (1952) · No paramétrico · Alternativa al ANOVA de 1 factor."
+      ref    = "Kruskal & Wallis (1952) · Non-parametric · Alternative to one-way ANOVA."
     ),
     chisq     = list(
-      nombre = "Chi-cuadrado de independencia",
+      nombre = "Chi-squared independence test",
       cuando = "Detects association between two categorical variables with large samples.",
       h0     = "H0: The two variables are independent (no association).",
-      uso    = "Asociar tipo de herencia con tipo de variante (DEL/DUP), cromosoma, etc.",
-      ref    = "Pearson (1900) · Requiere frecuencias esperadas >= 5 por celda."
+      uso    = "Associate inheritance type with variant type (DEL/DUP), chromosome, etc.",
+      ref    = "Pearson (1900) · Requires expected frequencies >= 5 per cell."
     ),
     fisher    = list(
-      nombre = "Test exacto de Fisher",
+      nombre = "Fisher's exact test",
       cuando = "Association between two binary variables or tables with small cells (n < 20).",
-      h0     = "H0: Las dos variables son independientes.",
+      h0     = "H0: The two variables are independent.",
       uso    = "More precise than chi-squared when there are cells with few observations.",
-      ref    = "Fisher (1922) · Exacto (no asintótico) · Recomendado para tamaños muestrales pequeños."
+      ref    = "Fisher (1922) · Exact (not asymptotic) · Recommended for small sample sizes."
     ),
     spearman  = list(
-      nombre = "Correlacion de Spearman",
-      cuando = "Mide la asociacion monotona entre dos variables continuas sin asumir normalidad.",
-      h0     = "H0: rho = 0 (no hay correlacion monotona).",
-      uso    = "Correlacion entre tamanio de variante y score AnnotSV.",
-      ref    = "Spearman (1904) · No parametrico · Robusto a valores extremos."
+      nombre = "Spearman correlation",
+      cuando = "Measures the monotonic association between two continuous variables without assuming normality.",
+      h0     = "H0: rho = 0 (no monotonic correlation).",
+      uso    = "Correlation between variant size and AnnotSV score.",
+      ref    = "Spearman (1904) · Non-parametric · Robust to outliers."
     ),
     pearson   = list(
-      nombre = "Correlacion de Pearson",
-      cuando = "Mide la asociacion lineal entre dos variables continuas normalmente distribuidas.",
-      h0     = "H0: r = 0 (no hay correlacion lineal).",
-      uso    = "Usar solo si ambas variables son aproximadamente normales (verificar con Shapiro-Wilk).",
-      ref    = "Pearson (1895) · Parametrico · Sensible a valores extremos."
+      nombre = "Pearson correlation",
+      cuando = "Measures the linear association between two normally distributed continuous variables.",
+      h0     = "H0: r = 0 (no linear correlation).",
+      uso    = "Use only if both variables are approximately normal (verify with Shapiro-Wilk).",
+      ref    = "Pearson (1895) · Parametric · Sensitive to outliers."
     ),
     shapiro   = list(
-      nombre = "Test de normalidad de Shapiro-Wilk",
-      cuando = "Contrasta si una muestra procede de una distribucion normal.",
-      h0     = "H0: Los datos siguen una distribucion normal.",
-      uso    = "Paso previo para decidir entre tests parametricos (t-test, ANOVA) y no parametricos (Wilcoxon, Kruskal).",
-      ref    = "Shapiro & Wilk (1965) · Potente para n < 50 · Para n grande, usar QQ-plot."
+      nombre = "Shapiro-Wilk normality test",
+      cuando = "Tests whether a sample comes from a normal distribution.",
+      h0     = "H0: The data follow a normal distribution.",
+      uso    = "Preliminary step to decide between parametric (t-test, ANOVA) and non-parametric (Wilcoxon, Kruskal) tests.",
+      ref    = "Shapiro & Wilk (1965) · Powerful for n < 50 · For large n, use QQ-plot."
     ),
     ks        = list(
-      nombre = "Test de Kolmogorov-Smirnov (2 muestras)",
-      cuando = "Compara la distribucion completa de dos muestras (no solo la mediana).",
-      h0     = "H0: Ambas muestras proceden de la misma distribucion continua.",
-      uso    = "Detectar si DEL y DUP tienen distribuciones de tamano o score distintas en su forma global.",
-      ref    = "Smirnov (1948) · Sensible a diferencias en forma, media y varianza."
+      nombre = "Kolmogorov-Smirnov test (2 samples)",
+      cuando = "Compares the full distribution of two samples (not just the median).",
+      h0     = "H0: Both samples come from the same continuous distribution.",
+      uso    = "Detect whether DEL and DUP have different size or score distributions in their overall shape.",
+      ref    = "Smirnov (1948) · Sensitive to differences in shape, mean and variance."
     ),
     prop_binom = list(
-      nombre = "Test binomial de proporciones",
+      nombre = "Binomial proportions test",
       cuando = "Tests whether the observed proportion of a category differs from a reference value.",
-      h0     = "H0: La proporcion observada es igual a p0 (valor esperado teorico).",
-      uso    = "Ejemplo: ¿la tasa de variantes de novo (~15-20% esperada en TEA) es distinta en esta cohorte?",
-      ref    = "Test binomial exacto · No asume normalidad · Valido para cualquier n."
+      h0     = "H0: The observed proportion equals p0 (theoretical expected value).",
+      uso    = "Example: Is the de novo variant rate (~15-20% expected in ASD) different in this cohort?",
+      ref    = "Exact binomial test · Does not assume normality · Valid for any n."
     ),
     prop2     = list(
-      nombre = "Comparacion de proporciones (2 grupos)",
-      cuando = "Contrasta si dos grupos tienen la misma proporcion de una caracteristica.",
-      h0     = "H0: La proporcion del evento es igual en ambos grupos.",
-      uso    = "Ejemplo: ¿los varones tienen mayor tasa de variantes de novo que las mujeres?",
-      ref    = "prop.test de R (correccion de Yates) · Equivalente al chi-cuadrado 2x2."
+      nombre = "Proportions comparison (2 groups)",
+      cuando = "Tests whether two groups have the same proportion of a characteristic.",
+      h0     = "H0: The event proportion is equal in both groups.",
+      uso    = "Example: Do males have a higher de novo variant rate than females?",
+      ref    = "R's prop.test (Yates correction) · Equivalent to 2×2 chi-squared."
     ),
     burden    = list(
-      nombre = "Analisis de carga genomica (Burden)",
-      cuando = "Compara el numero de variantes por familia entre dos subgrupos.",
-      h0     = "H0: La carga media de variantes es igual en ambos grupos.",
-      uso    = "Ejemplo: ¿Las familias con variante de novo tienen mas variantes en total? ¿Las SFARI vs no SFARI?",
-      ref    = "Wilcoxon sobre conteos por individuo · Robusto · Estandar en estudios de CNV en TEA."
+      nombre = "Genomic burden analysis",
+      cuando = "Compares the number of variants per family between two subgroups.",
+      h0     = "H0: The mean variant burden is equal in both groups.",
+      uso    = "Example: Do families with de novo variants have more variants overall? SFARI vs non-SFARI?",
+      ref    = "Wilcoxon on per-individual counts · Robust · Standard in CNV studies in ASD."
     )
   )
   
@@ -5951,16 +5951,16 @@ server <- function(input, output, session) {
       div(class="mt-1 d-flex flex-column gap-1",
           div(class="d-flex align-items-center gap-2",
               tags$span(class="badge bg-danger", "p < 0.001"),
-              tags$span("Diferencia muy significativa (***)")),
+              tags$span("Very significant difference (***)")),
           div(class="d-flex align-items-center gap-2",
               tags$span(class="badge bg-warning text-dark", "p < 0.01"),
-              tags$span("Diferencia significativa (**)")),
+              tags$span("Significant difference (**)")),
           div(class="d-flex align-items-center gap-2",
               tags$span(class="badge bg-primary", "p < 0.05"),
-              tags$span("Diferencia marginalmente significativa (*)")),
+              tags$span("Marginally significant difference (*)")),
           div(class="d-flex align-items-center gap-2",
               tags$span(class="badge bg-secondary", "p \u2265 0.05"),
-              tags$span("Sin evidencia suficiente de diferencia (ns)"))
+              tags$span("Insufficient evidence of difference (ns)"))
       ),
       div(class="mt-1 text-muted", style="font-size:0.9em;",
           "\u26a0\ufe0f Un p-valor significativo indica que la diferencia observada no es atribuible al azar,",
@@ -5992,7 +5992,7 @@ server <- function(input, output, session) {
   test_resultado <- eventReactive(input$btn_ejecutar_test, {
     tipo <- input$test_tipo
     df   <- test_datos_base()
-    if (nrow(df) == 0) return(list(error="Sin datos cargados."))
+    if (nrow(df) == 0) return(list(error="No data loaded."))
     
     tryCatch({
       
@@ -6011,7 +6011,7 @@ server <- function(input, output, session) {
         var_y  <- input$test_var_y; grp <- input$test_var_grupo
         grupos <- input$test_grupos_multi
         df2    <- df[as.character(df[[grp]]) %in% grupos & is.finite(df[[var_y]]),]
-        if (nrow(df2) < 6) return(list(error="Insuficientes datos tras el filtro."))
+        if (nrow(df2) < 6) return(list(error="Insufficient data after filtering."))
         res <- kruskal.test(df2[[var_y]] ~ factor(df2[[grp]]))
         list(tipo=tipo, test=res, df2=df2, var_y=var_y, grp=grp, grupos=grupos)
         
@@ -6019,11 +6019,11 @@ server <- function(input, output, session) {
         v1 <- input$test_var_fila; v2 <- input$test_var_col
         df2 <- df[!is.na(df[[v1]]) & !is.na(df[[v2]]),]
         tbl <- table(df2[[v1]], df2[[v2]])
-        if (any(dim(tbl) < 2)) return(list(error="Alguna variable tiene menos de 2 niveles."))
+        if (any(dim(tbl) < 2)) return(list(error="A variable has fewer than 2 levels."))
         if (tipo == "chisq") {
           res <- chisq.test(tbl)
         } else {
-          if (prod(dim(tbl)) > 100) return(list(error="Tabla demasiado grande para Fisher exacto. Usa Chi-cuadrado."))
+          if (prod(dim(tbl)) > 100) return(list(error="Table too large for exact Fisher test. Use Chi-squared."))
           res <- fisher.test(tbl, simulate.p.value=(prod(dim(tbl))>4))
         }
         list(tipo=tipo, test=res, tabla=tbl, v1=v1, v2=v2)
@@ -6034,7 +6034,7 @@ server <- function(input, output, session) {
         x <- df[[vx]]; y <- df[[vy]]
         if (log_x) x <- log10(x)
         ok <- is.finite(x) & is.finite(y)
-        if (sum(ok) < 5) return(list(error="Menos de 5 pares validos."))
+        if (sum(ok) < 5) return(list(error="Fewer than 5 valid pairs."))
         metodo <- if (tipo=="spearman") "spearman" else "pearson"
         res <- cor.test(x[ok], y[ok], method=metodo)
         list(tipo=tipo, test=res, x=x[ok], y=y[ok], vx=vx, vy=vy, log_x=log_x)
@@ -6045,9 +6045,9 @@ server <- function(input, output, session) {
         if (grp_var == "ninguno") {
           vals <- df[[var]][is.finite(df[[var]])]
           if (length(vals) < 3 || length(vals) > 5000)
-            return(list(error=paste0("n=",length(vals)," fuera de rango [3,5000].")))
+            return(list(error=paste0("n=",length(vals)," out of range [3,5000].")))
           res <- shapiro.test(vals)
-          list(tipo=tipo, tests=list(list(grp="Todos",res=res,vals=vals)), var=var)
+          list(tipo=tipo, tests=list(list(grp="All",res=res,vals=vals)), var=var)
         } else {
           niveles <- sort(unique(na.omit(as.character(df[[grp_var]]))))
           results <- lapply(niveles, function(g) {
@@ -6076,7 +6076,7 @@ server <- function(input, output, session) {
         vals  <- as.character(df[[var]])
         x <- sum(!is.na(vals) & vals == exito)
         n <- sum(!is.na(vals))
-        if (n < 5) return(list(error="Menos de 5 observaciones validas."))
+        if (n < 5) return(list(error="Fewer than 5 valid observations."))
         res <- binom.test(x, n, p=p0)
         list(tipo=tipo, test=res, x=x, n=n, p0=p0, exito=exito, var=var)
         
@@ -6086,11 +6086,11 @@ server <- function(input, output, session) {
         # Success = value > global median (derived binary variable)
         med_global <- median(df[[var_y]], na.rm=TRUE)
         df2 <- df[as.character(df[[grp]]) %in% c(ga,gb) & is.finite(df[[var_y]]),]
-        if (nrow(df2) < 6) return(list(error="Datos insuficientes."))
+        if (nrow(df2) < 6) return(list(error="Insufficient data."))
         exito <- df2[[var_y]] > med_global
         n_a <- sum(as.character(df2[[grp]])==ga);  x_a <- sum(exito[as.character(df2[[grp]])==ga])
         n_b <- sum(as.character(df2[[grp]])==gb);  x_b <- sum(exito[as.character(df2[[grp]])==gb])
-        if (n_a<1 || n_b<1) return(list(error="Un grupo esta vacio."))
+        if (n_a<1 || n_b<1) return(list(error="One group is empty."))
         res <- prop.test(c(x_a,x_b), c(n_a,n_b))
         list(tipo=tipo, test=res, ga=ga, gb=gb, n_a=n_a, n_b=n_b, x_a=x_a, x_b=x_b,
              med_global=med_global, var_y=var_y, grp=grp)
@@ -6103,17 +6103,17 @@ server <- function(input, output, session) {
           sapply(fams, function(f) sum(as.character(df[[grp_var]])==g & df$ID_Familia==f))
         }
         ca <- conta(ga); cb <- conta(gb)
-        if (length(ca)<2 || length(cb)<2) return(list(error="Grupos con menos de 2 familias."))
+        if (length(ca)<2 || length(cb)<2) return(list(error="Groups with fewer than 2 families."))
         res <- wilcox.test(ca, cb, conf.int=TRUE)
         list(tipo=tipo, test=res,
              grupos=list(A=list(nombre=ga,vals=ca),B=list(nombre=gb,vals=cb)),
              grp_var=grp_var)
       }
       
-    }, error = function(e) list(error=paste("Error al ejecutar el test:", e$message)))
+    }, error = function(e) list(error=paste("Error running the test:", e$message)))
   })
   
-  # ── Formateo p-value con estrellas ────────────────────────────────────────────
+  # ── p-value formatting with stars ────────────────────────────────────────────
   fmt_p <- function(p) {
     if (is.null(p) || is.na(p)) return("NA")
     estrellas <- if (p < 0.001) "***" else if (p < 0.01) "**" else if (p < 0.05) "*" else "ns"
@@ -6124,15 +6124,15 @@ server <- function(input, output, session) {
     if (p < 0.001) "bg-danger" else if (p < 0.01) "bg-warning text-dark" else if (p < 0.05) "bg-primary" else "bg-secondary"
   }
   
-  # ── Renderizado del resultado ─────────────────────────────────────────────────
+  # ── Result rendering ─────────────────────────────────────────────────
   output$ui_test_resultado <- renderUI({
     res <- test_resultado()
-    if (is.null(res)) return(div(class="alert alert-info", "Configura el test y pulsa ▶ Ejecutar."))
+    if (is.null(res)) return(div(class="alert alert-info", "Configure the test and click ▶ Run."))
     if (!is.null(res$error)) return(div(class="alert alert-danger", res$error))
     
     tipo <- res$tipo
     
-    # Construir tarjetas de resultado
+    # Build result cards
     tarjeta <- function(titulo, valor, clase="bg-primary") {
       div(class=paste("card text-white h-100", clase),
           div(class="card-body p-3 text-center",
@@ -6150,27 +6150,27 @@ server <- function(input, output, session) {
         paste0("[", round(tst$conf.int[1],3), ", ", round(tst$conf.int[2],3), "]") else "—"
       tagList(
         card(card_header(class="bg-success text-white fw-bold",
-                         bsicons::bs_icon("check-circle"), " Resultados"),
+                         bsicons::bs_icon("check-circle"), " Results"),
              card_body(
                layout_columns(col_widths=c(3,3,3,3),
-                              tarjeta("p-valor", fmt_p(p), semaforo_p(p)),
+                              tarjeta("p-value", fmt_p(p), semaforo_p(p)),
                               tarjeta("W statistic", round(tst$statistic,2), "bg-dark"),
                               tarjeta(paste0("Mediana ", ga), med_a, "bg-info"),
                               tarjeta(paste0("Mediana ", gb), med_b, "bg-info")
                ),
                div(class="dm-result-panel rounded border p-3 mt-3",
                    tags$b("Location difference estimator: "), efecto, br(),
-                   tags$b("Intervalo de confianza 95%: "), ci_txt, br(), br(),
+                   tags$b("95% confidence interval: "), ci_txt, br(), br(),
                    tags$b("Interpretation: "),
                    if (p < 0.05)
                      tags$span(style="color:#CC0000; font-weight:600;",
-                               paste0("Se rechaza H0 (p=", formatC(p,digits=3,format="g"), "). ",
-                                      "There are statistically significant differences between '",
+                               paste0("H0 rejected (p=", formatC(p,digits=3,format="g"), "). ",
+                                      "Statistically significant differences between '",
                                       ga, "' y '", gb, "'."))
                    else
                      tags$span(class="dm-muted-txt",
-                               paste0("No se rechaza H0 (p=", formatC(p,digits=3,format="g"), "). ",
-                                      "No hay evidencia suficiente de diferencias entre '",
+                               paste0("H0 not rejected (p=", formatC(p,digits=3,format="g"), "). ",
+                                      "Insufficient evidence of differences between '",
                                       ga, "' y '", gb, "'."))
                )
              )
@@ -6185,24 +6185,24 @@ server <- function(input, output, session) {
       })
       tagList(
         card(card_header(class="bg-success text-white fw-bold",
-                         bsicons::bs_icon("check-circle"), " Resultados"),
+                         bsicons::bs_icon("check-circle"), " Results"),
              card_body(
                layout_columns(col_widths=c(4,4,4),
-                              tarjeta("p-valor", fmt_p(p), semaforo_p(p)),
+                              tarjeta("p-value", fmt_p(p), semaforo_p(p)),
                               tarjeta("Chi² (H)", round(tst$statistic,2), "bg-dark"),
-                              tarjeta("g.l.", tst$parameter, "bg-secondary")
+                              tarjeta("d.f.", tst$parameter, "bg-secondary")
                ),
                div(class="dm-result-panel rounded border p-3 mt-3",
-                   tags$b("Medianas por grupo:"),
+                   tags$b("Medians by group:"),
                    tags$ul(lapply(names(meds), function(g) tags$li(tags$b(g,":"), meds[[g]]))),
                    tags$b("Interpretation: "),
                    if (p < 0.05)
                      tags$span(style="color:#CC0000; font-weight:600;",
-                               paste0("Se rechaza H0. Al menos un grupo difiere significativamente (p=",
+                               paste0("H0 rejected. At least one group differs significantly (p=",
                                       formatC(p,digits=3,format="g"), "). Considera post-hoc por pares (Wilcoxon + Bonferroni)."))
                    else
                      tags$span(class="dm-muted-txt",
-                               paste0("No se rechaza H0 (p=", formatC(p,digits=3,format="g"),
+                               paste0("H0 not rejected (p=", formatC(p,digits=3,format="g"),
                                       "). No hay diferencias significativas entre los grupos."))
                )
              )
@@ -6213,18 +6213,18 @@ server <- function(input, output, session) {
       tst <- res$test; p <- tst$p.value
       tagList(
         card(card_header(class="bg-success text-white fw-bold",
-                         bsicons::bs_icon("check-circle"), " Resultados"),
+                         bsicons::bs_icon("check-circle"), " Results"),
              card_body(
                layout_columns(col_widths=c(4,4,4),
-                              tarjeta("p-valor", fmt_p(p), semaforo_p(p)),
-                              tarjeta(if(tipo=="chisq") "Chi² stat" else "OR estimado",
+                              tarjeta("p-value", fmt_p(p), semaforo_p(p)),
+                              tarjeta(if(tipo=="chisq") "Chi² stat" else "Estimated OR",
                                       if(tipo=="chisq") round(tst$statistic,3)
                                       else if(!is.null(tst$estimate)) round(tst$estimate,3) else "—",
                                       "bg-dark"),
-                              tarjeta("g.l.", if(tipo=="chisq") tst$parameter else "—", "bg-secondary")
+                              tarjeta("d.f.", if(tipo=="chisq") tst$parameter else "—", "bg-secondary")
                ),
                div(class="dm-result-panel rounded mt-3",
-                   tags$b("Tabla de contingencia observada:"), br(),
+                   tags$b("Observed contingency table:"), br(),
                    renderTable(as.data.frame.matrix(res$tabla)),
                    br(), tags$b("Interpretation: "),
                    if (p < 0.05)
@@ -6248,11 +6248,11 @@ server <- function(input, output, session) {
       direc  <- if(rho > 0) "positiva" else "negativa"
       tagList(
         card(card_header(class="bg-success text-white fw-bold",
-                         bsicons::bs_icon("check-circle"), " Resultados"),
+                         bsicons::bs_icon("check-circle"), " Results"),
              card_body(
                layout_columns(col_widths=c(4,4,4),
-                              tarjeta("p-valor", fmt_p(p), semaforo_p(p)),
-                              tarjeta(if(tipo=="spearman") "rho de Spearman" else "r de Pearson", rho,
+                              tarjeta("p-value", fmt_p(p), semaforo_p(p)),
+                              tarjeta(if(tipo=="spearman") "Spearman's rho" else "Pearson's r", rho,
                                       if(abs(rho)>=0.4)"bg-primary" else "bg-secondary"),
                               tarjeta("IC 95%", ci_txt, "bg-dark")
                ),
@@ -6260,11 +6260,11 @@ server <- function(input, output, session) {
                    tags$b("Interpretation: "),
                    if (p < 0.05)
                      tags$span(style="color:#2C6FAC; font-weight:600;",
-                               paste0("Correlacion ", fuerza, " ", direc, " (rho=", rho, ", p=",
+                               paste0("Correlation ", fuerza, " ", direc, " (rho=", rho, ", p=",
                                       formatC(p,digits=3,format="g"), ")."))
                    else
                      tags$span(class="dm-muted-txt",
-                               paste0("No hay correlacion significativa (rho=", rho, ", p=",
+                               paste0("No significant correlation (rho=", rho, ", p=",
                                       formatC(p,digits=3,format="g"), ")."))
                )
              )
@@ -6272,16 +6272,16 @@ server <- function(input, output, session) {
       )
       
     } else if (tipo == "shapiro") {
-      resultados_sw <- res$tests
+      Results_sw <- res$tests
       tagList(
         card(card_header(class="bg-success text-white fw-bold",
-                         bsicons::bs_icon("check-circle"), " Resultados"),
+                         bsicons::bs_icon("check-circle"), " Results"),
              card_body(
                DTOutput("tabla_shapiro_detalle"),
                div(class="dm-result-panel rounded mt-2 p-2", style="font-size:0.85em;",
                    tags$b("Interpretation guide: "),
-                   "p > 0.05 → no se rechaza normalidad (distribución compatible con Normal). ",
-                   "p ≤ 0.05 → se rechaza normalidad → usar tests no paramétricos (Wilcoxon, Kruskal-Wallis).")
+                   "p > 0.05 → normality not rejected (distribution compatible with Normal). ",
+                   "p ≤ 0.05 → normality rejected → use non-parametric tests (Wilcoxon, Kruskal-Wallis).")
              )
         )
       )
@@ -6292,10 +6292,10 @@ server <- function(input, output, session) {
       ci_txt <- paste0("[", round(tst$conf.int[1],3), ", ", round(tst$conf.int[2],3), "]")
       tagList(
         card(card_header(class="bg-success text-white fw-bold",
-                         bsicons::bs_icon("check-circle"), " Resultados"),
+                         bsicons::bs_icon("check-circle"), " Results"),
              card_body(
                layout_columns(col_widths=c(3,3,3,3),
-                              tarjeta("p-valor", fmt_p(p), semaforo_p(p)),
+                              tarjeta("p-value", fmt_p(p), semaforo_p(p)),
                               tarjeta("Observed proportion", p_obs, "bg-primary"),
                               tarjeta("H0 proportion", res$p0, "bg-secondary"),
                               tarjeta("IC 95%", ci_txt, "bg-dark")
@@ -6305,11 +6305,11 @@ server <- function(input, output, session) {
                    tags$b("Interpretation: "),
                    if (p < 0.05)
                      tags$span(style="color:#CC0000;font-weight:600;",
-                               paste0("La proporcion observada (", p_obs, ") difiere significativamente de p0=",
+                               paste0("The observed proportion (", p_obs, ") difiere significativamente de p0=",
                                       res$p0, " (p=", formatC(p,digits=3,format="g"), ")."))
                    else
                      tags$span(class="dm-muted-txt",
-                               paste0("No hay diferencia significativa respecto a p0=", res$p0,
+                               paste0("No significant difference with respect to p0=", res$p0,
                                       " (p=", formatC(p,digits=3,format="g"), ")."))
                )
              )
@@ -6321,10 +6321,10 @@ server <- function(input, output, session) {
       p_a <- round(res$x_a/res$n_a, 3); p_b <- round(res$x_b/res$n_b, 3)
       tagList(
         card(card_header(class="bg-success text-white fw-bold",
-                         bsicons::bs_icon("check-circle"), " Resultados"),
+                         bsicons::bs_icon("check-circle"), " Results"),
              card_body(
                layout_columns(col_widths=c(4,4,4),
-                              tarjeta("p-valor", fmt_p(p), semaforo_p(p)),
+                              tarjeta("p-value", fmt_p(p), semaforo_p(p)),
                               tarjeta(paste0("Prop. ", res$ga), p_a, "bg-info"),
                               tarjeta(paste0("Prop. ", res$gb), p_b, "bg-info")
                ),
@@ -6335,11 +6335,11 @@ server <- function(input, output, session) {
                    tags$b("Interpretation: "),
                    if (p < 0.05)
                      tags$span(style="color:#CC0000;font-weight:600;",
-                               paste0("Las proporciones son significativamente distintas (p=",
+                               paste0("The proportions are significantly different (p=",
                                       formatC(p,digits=3,format="g"), ")."))
                    else
                      tags$span(class="dm-muted-txt",
-                               paste0("No hay diferencia significativa en proporciones (p=",
+                               paste0("No significant difference in proportions (p=",
                                       formatC(p,digits=3,format="g"), ")."))
                )
              )
@@ -6348,7 +6348,7 @@ server <- function(input, output, session) {
     }
   })
   
-  # Tabla shapiro detalle
+  # Shapiro detail table
   output$tabla_shapiro_detalle <- renderDT({
     res <- test_resultado(); req(!is.null(res), res$tipo=="shapiro")
     df_sw <- do.call(rbind, lapply(res$tests, function(x) {
@@ -6370,14 +6370,14 @@ server <- function(input, output, session) {
     tipo <- res$tipo
     lbl  <- switch(tipo,
                    wilcoxon  = "Comparative boxplot with significance annotation",
-                   kruskal   = "Boxplot por grupos",
-                   chisq     = , fisher = "Mosaico de la tabla de contingencia",
+                   kruskal   = "Boxplot by groups",
+                   chisq     = , fisher = "Contingency table mosaic",
                    spearman  = , pearson = "Scatter plot with trend line",
-                   shapiro   = "QQ-plot (cuantil-cuantil) por grupo",
+                   shapiro   = "QQ-plot (quantile-quantile) by group",
                    ks        = "Cumulative distribution functions (ECDF)",
                    prop_binom = "Proportion bars with exact binomial CI",
                    prop2     = "Comparative proportion bars",
-                   burden    = "Boxplot de carga por familia",
+                   burden    = "Variant burden boxplot per family",
                    ""
     )
     tags$small(class="text-muted", lbl)
@@ -6417,8 +6417,8 @@ server <- function(input, output, session) {
                            name=grp, line=list(width=2),
                            hovertemplate=paste0(grp,"<br>x=%{x:.3f}<br>F(x)=%{y:.3f}<extra></extra>"))
         }
-        layout(fig, xaxis=list(title=res$var_y %||% "valor"),
-               yaxis=list(title="F(x) acumulada", range=c(0,1)),
+        layout(fig, xaxis=list(title=res$var_y %||% "value"),
+               yaxis=list(title="Cumulative F(x)", range=c(0,1)),
                legend=list(orientation="h",y=-0.2),
                annotations=list(list(x=0.5,y=1.05,xref="paper",yref="paper",
                                      showarrow=FALSE,text=p_lbl,font=list(size=13,color=if(p<0.05)"#CC0000"else"#555"))),
@@ -6438,7 +6438,7 @@ server <- function(input, output, session) {
         }
         y_max <- max(c(ya,yb), na.rm=TRUE)
         layout(fig,
-               yaxis=list(title=res$var_y %||% "valor"),
+               yaxis=list(title=res$var_y %||% "value"),
                xaxis=list(title=""),
                showlegend=TRUE,
                annotations=list(list(
@@ -6483,10 +6483,10 @@ server <- function(input, output, session) {
               colorscale=list(c(0,"#0066CC"),c(0.5,"#FFFFFF"),c(1,"#CC0000")),
               zmid=0,
               text=matrix(paste0("Obs:",tbl,"\nRes:",round(z_mat,2)), nrow=nrow(tbl)),
-              hovertemplate="Fila:%{y}<br>Col:%{x}<br>%{text}<extra></extra>") |>
+              hovertemplate="Row:%{y}<br>Col:%{x}<br>%{text}<extra></extra>") |>
         layout(xaxis=list(title=res$v2,tickangle=-30),
                yaxis=list(title=res$v1,autorange="reversed"),
-               title=list(text="Residuos estandarizados de Pearson (rojo=mayor de lo esperado)",
+               title=list(text="Pearson standardised residuals (red=greater than expected)",
                           font=list(size=11)),
                margin=list(t=60,b=80,l=100),paper_bgcolor="#FFFFFF")
       
@@ -6533,7 +6533,7 @@ server <- function(input, output, session) {
       layout(fig, xaxis=list(title="Theoretical normal quantiles"),
              yaxis=list(title="Cuantiles observados"),
              legend=list(orientation="h",y=-0.2),
-             title=list(text="Desviación de la línea → no normalidad", font=list(size=11)),
+             title=list(text="Deviation from line → non-normality", font=list(size=11)),
              margin=list(t=50,b=80), plot_bgcolor="#FAFAFA",paper_bgcolor="#FFFFFF")
       
     } else if (tipo == "prop_binom") {
@@ -6633,7 +6633,7 @@ server <- function(input, output, session) {
   # =============================================================================
   
   hpo_familias_disponibles <- reactive({
-    res  <- rv$resultados
+    res  <- rv$Results
     fams <- character(0)
     if (!is.null(res$CNVs) && nrow(res$CNVs) > 0 && "ID_Familia" %in% names(res$CNVs))
       fams <- union(fams, as.character(res$CNVs$ID_Familia))
@@ -6658,7 +6658,7 @@ server <- function(input, output, session) {
     fams_sel  <- input$hpo_familias_sel
     if (is.null(fams_sel) || length(fams_sel) == 0) return(data.frame())
     solo_sfari <- isTRUE(input$hpo_solo_sfari)
-    res <- rv$resultados
+    res <- rv$Results
     dfs <- list()
     if (!is.null(res$CNVs) && nrow(res$CNVs) > 0) dfs[["CNVs"]] <- res$CNVs
     if (!is.null(res$SVs)  && nrow(res$SVs)  > 0) dfs[["SVs"]]  <- res$SVs
@@ -6780,11 +6780,11 @@ server <- function(input, output, session) {
         return(list(ok = FALSE, 
                     msg = paste0("No se pudo conectar con HPO ni MyGene.info.\n",
                                  "Check your internet connection."))
-      )}
+        )}
       
       data <- content(resp, "parsed")
       if (length(data$hits) == 0) {
-        return(list(ok = FALSE, msg = paste0("Gen «", gen, "» no encontrado")))
+        return(list(ok = FALSE, msg = paste0("Gene «", gen, "» not found")))
       }
       
       hit <- data$hits[[1]]
@@ -6844,7 +6844,7 @@ server <- function(input, output, session) {
         class = "d-flex flex-column align-items-center justify-content-center text-center gap-3",
         style = "min-height:500px;",
         tags$span(style = "font-size:3.5em;", "🧬"),
-        tags$h5(class = "text-muted fw-normal", "Selecciona un gen"),
+        tags$h5(class = "text-muted fw-normal", "Select a gene"),
         tags$p(class = "text-muted small mb-0",
                "Haz clic en cualquier gen de la columna izquierda"),
         tags$p(class = "text-muted small",
@@ -6896,7 +6896,7 @@ server <- function(input, output, session) {
         tagList(
           tags$h6(class = "mt-3 mb-1 fw-bold small text-uppercase",
                   style = "color:#8E44AD; letter-spacing:.05em;",
-                  "🧬 Enfermedades asociadas"),
+                  "🧬 Associated diseases"),
           tags$ul(class = "list-group list-group-flush mb-2",
                   style = "max-height:180px; overflow-y:auto;",
                   lapply(enf_list, function(e) {
@@ -6952,7 +6952,7 @@ server <- function(input, output, session) {
                        target = "_blank",
                        class  = "btn btn-sm flex-shrink-0",
                        style  = paste0("background:", hpo_color, "; color:#fff; border-color:", hpo_color, ";"),
-                       "↗ Ver en HPO")
+                       "↗ View in HPO")
             ),
             tags$small(class = "text-muted d-block mt-1",
                        paste0(n_terms, " terms in ", length(cat_map),
@@ -6963,7 +6963,7 @@ server <- function(input, output, session) {
           tagList(
             tags$h6(class = "mt-1 mb-2 fw-bold small text-uppercase",
                     style = paste0("color:", hpo_color, "; letter-spacing:.05em;"),
-                    "📋 Términos HPO por categoría"),
+                    "📋 HPO terms by category"),
             cat_uis
           )
       )
@@ -6978,11 +6978,11 @@ server <- function(input, output, session) {
     fam <- input$hpo_fam_nota_sel
     if (is.null(fam) || !nzchar(fam))
       return(div(class = "text-muted small fst-italic p-2",
-                 "Selecciona una familia para a\u00f1adir su descripci\u00f3n HPO."))
+                 "Select a family to add its HPO description."))
     nota_actual <- rv$hpo_notas[[fam]] %||% ""
     tiene_nota  <- nzchar(trimws(nota_actual))
     # Genes de referencia de esta familia
-    res  <- rv$resultados
+    res  <- rv$Results
     dfs  <- list()
     if (!is.null(res$CNVs)) dfs[["CNVs"]] <- res$CNVs
     if (!is.null(res$SVs))  dfs[["SVs"]]  <- res$SVs
@@ -7030,7 +7030,7 @@ server <- function(input, output, session) {
         if (tiene_nota) {
           div(class = "p-2 rounded small",
               style = "background:var(--dm-success-bg); border-left:3px solid var(--dm-success-left); white-space:pre-wrap; font-size:0.8em;",
-              tags$b("Guardado: "),
+              tags$b("Saved: "),
               if (nchar(nota_actual) > 200) paste0(substr(nota_actual,1,200),"\u2026") else nota_actual
           )
         } else {
