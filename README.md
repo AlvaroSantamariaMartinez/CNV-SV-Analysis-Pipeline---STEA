@@ -37,7 +37,7 @@ cd cnv-sv-pipeline
 Open R or RStudio and run:
 
 ```r
-source("instalar_dependencias.R")
+source("Install_Dependencies.R")
 ```
 
 This installs all required CRAN and Bioconductor packages.
