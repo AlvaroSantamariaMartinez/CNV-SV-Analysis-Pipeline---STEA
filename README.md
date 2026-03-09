@@ -1,4 +1,4 @@
-# CNV/SV Analysis Pipeline — FiltroB
+# CNV/SV Analysis Pipeline--STEA
 
 A Shiny application for automated analysis, filtering, and visualization of **copy number variants (CNVs)** and **structural variants (SVs)** from trio-based genomic studies.
 
@@ -184,5 +184,5 @@ MIT License — see [LICENSE](LICENSE).
 If you use this pipeline in your work, please cite the repository:
 
 ```
-STEA CNV/SV Analysis Pipeline. GitHub: https://github.com/AlvaroSantamariaMartinez/cnv-sv-pipeline
+CNV/SV Analysis Pipeline--STEA. GitHub: https://github.com/AlvaroSantamariaMartinez/cnv-sv-pipeline
 ```
