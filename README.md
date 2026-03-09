@@ -89,7 +89,7 @@ source("FiltroB_STEA.R")
 cnv-sv-pipeline/
 ├── app.R                          # Shiny application
 ├── FiltroB_STEA.R                 # Core analysis pipeline
-├── instalar_dependencias.R        # Dependency installer
+├── Install_Dependencies.R        # Dependency installer
 ├── README.md
 ├── LICENSE
 ├── .gitignore
