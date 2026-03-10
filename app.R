@@ -2531,7 +2531,10 @@ server <- function(input, output, session) {
       hpo_btn <- NULL
       # Robust detection: looks for any column whose name contains "gene"
       # para cubrir variantes como Gene_name, gene_name, Gene_Name, genes, etc.
-      gene_col_hpo <- names(fd)[grep("gene", names(fd), ignore.case = TRUE, perl = TRUE)][1]
+      gene_col_hpo <- if ("Gene_name" %in% names(fd)) "Gene_name" else {
+        cands_hpo <- names(fd)[grep("gene", names(fd), ignore.case = TRUE)]
+        gene_col_hpo <- cands_hpo[!grepl("panel", cands_hpo, ignore.case = TRUE)][1]
+      }
       
       if (!is.na(gene_col_hpo) && !is.null(gene_col_hpo)) {
         gene_raw_hpo <- trimws(as.character(fd[[gene_col_hpo]][1]))
@@ -6862,23 +6865,40 @@ server <- function(input, output, session) {
     fams_sel  <- input$hpo_familias_sel
     if (is.null(fams_sel) || length(fams_sel) == 0) return(data.frame())
     solo_sfari <- isTRUE(input$hpo_solo_sfari)
-    res <- rv$resultados
+    
+    # Soporte para ambas nomenclaturas de rv
+    res <- if (!is.null(rv$Results)) rv$Results else rv$resultados
     dfs <- list()
     if (!is.null(res$CNVs) && nrow(res$CNVs) > 0) dfs[["CNVs"]] <- res$CNVs
     if (!is.null(res$SVs)  && nrow(res$SVs)  > 0) dfs[["SVs"]]  <- res$SVs
     if (length(dfs) == 0) return(data.frame())
+    
     filas <- bind_rows(lapply(dfs, function(df) {
       df_f <- df[as.character(df$ID_Familia) %in% fams_sel, , drop = FALSE]
       if ("Annotation_mode" %in% names(df_f))
         df_f <- df_f[!is.na(df_f$Annotation_mode) & df_f$Annotation_mode == "full", , drop = FALSE]
       df_f
     }))
+    
     if (is.null(filas) || nrow(filas) == 0) return(data.frame())
-    # Find gene column robustly
-    gene_col <- names(filas)[grep("gene", names(filas), ignore.case = TRUE)][1]
+    
+    # ── Búsqueda de columna a prueba de fallos ──
+    # 1. Obtenemos todas las columnas que tengan "gene"
+    cands <- names(filas)[grep("gene", names(filas), ignore.case = TRUE)]
+    # 2. Descartamos cualquier columna que contenga "panel" (como En_Panel_Genes)
+    cands <- cands[!grepl("panel", cands, ignore.case = TRUE)]
+    gene_col <- if (length(cands) > 0) cands[1] else NA
+    
     if (is.na(gene_col)) return(data.frame())
-    if (solo_sfari && "En_Panel_SFARI" %in% names(filas))
-      filas <- filas[es_sfari_col(filas$En_Panel_SFARI), , drop = FALSE]
+    
+    # Filtro SFARI si el usuario marcó la casilla
+    if (solo_sfari) {
+      col_sfari <- names(filas)[grep("panel", names(filas), ignore.case = TRUE)][1]
+      if (!is.na(col_sfari)) {
+        filas <- filas[es_sfari_col(filas[[col_sfari]]), , drop = FALSE]
+      }
+    }
+    
     gene_raw <- toupper(trimws(as.character(filas[[gene_col]])))
     genes_v  <- unique(trimws(unlist(strsplit(
       paste(gene_raw[!is.na(gene_raw) & gene_raw != "" & gene_raw != "."], collapse = ";"),
@@ -6886,6 +6906,7 @@ server <- function(input, output, session) {
     ))))
     genes_v <- sort(genes_v[nzchar(genes_v) & genes_v != "." & toupper(genes_v) != "NA"])
     if (length(genes_v) == 0) return(data.frame())
+    
     data.frame(gen = genes_v, stringsAsFactors = FALSE)
   })
   
@@ -7231,37 +7252,6 @@ server <- function(input, output, session) {
                          server   = TRUE)
   })
   
-  hpo_genes_tabla <- reactive({
-    fams_sel  <- input$hpo_familias_sel
-    if (is.null(fams_sel) || length(fams_sel) == 0) return(data.frame())
-    solo_sfari <- isTRUE(input$hpo_solo_sfari)
-    res <- rv$Results
-    dfs <- list()
-    if (!is.null(res$CNVs) && nrow(res$CNVs) > 0) dfs[["CNVs"]] <- res$CNVs
-    if (!is.null(res$SVs)  && nrow(res$SVs)  > 0) dfs[["SVs"]]  <- res$SVs
-    if (length(dfs) == 0) return(data.frame())
-    filas <- bind_rows(lapply(dfs, function(df) {
-      df_f <- df[as.character(df$ID_Familia) %in% fams_sel, , drop = FALSE]
-      if ("Annotation_mode" %in% names(df_f))
-        df_f <- df_f[!is.na(df_f$Annotation_mode) & df_f$Annotation_mode == "full", , drop = FALSE]
-      df_f
-    }))
-    if (is.null(filas) || nrow(filas) == 0) return(data.frame())
-    # Buscar columna de genes de forma robusta
-    gene_col <- names(filas)[grep("gene", names(filas), ignore.case = TRUE)][1]
-    if (is.na(gene_col)) return(data.frame())
-    if (solo_sfari && "En_Panel_Genes" %in% names(filas))
-      filas <- filas[es_sfari_col(filas$En_Panel_Genes), , drop = FALSE]
-    gene_raw <- toupper(trimws(as.character(filas[[gene_col]])))
-    genes_v  <- unique(trimws(unlist(strsplit(
-      paste(gene_raw[!is.na(gene_raw) & gene_raw != "" & gene_raw != "."], collapse = ";"),
-      "[;,/|[:space:]]+"
-    ))))
-    genes_v <- sort(genes_v[nzchar(genes_v) & genes_v != "." & toupper(genes_v) != "NA"])
-    if (length(genes_v) == 0) return(data.frame())
-    data.frame(gen = genes_v, stringsAsFactors = FALSE)
-  })
-  
   output$ui_hpo_n_genes <- renderUI({
     n <- nrow(hpo_genes_tabla())
     if (n == 0) tags$span(class = "badge bg-secondary", "0")
@@ -7571,7 +7561,8 @@ server <- function(input, output, session) {
         df_f
       }))
       if (is.null(filas) || nrow(filas) == 0) return(character(0))
-      gc <- names(filas)[grep("gene", names(filas), ignore.case = TRUE)][1]
+      cands_gc <- names(filas)[grep("gene", names(filas), ignore.case = TRUE)]
+      gc <- cands_gc[!grepl("panel", cands_gc, ignore.case = TRUE)][1]
       if (is.na(gc)) return(character(0))
       gr <- toupper(trimws(as.character(filas[[gc]])))
       gv <- unique(trimws(unlist(strsplit(paste(gr[!is.na(gr) & gr != "" & gr != "."], collapse=";"), "[;,/|[:space:]]+"))))
