@@ -3,36 +3,42 @@ library(dplyr)
 library(stringr)
 library(readxl)
 library(openxlsx)
-library(parallel)          # procesamiento paralelo de familias
-library(GenomicRanges)     # overlap preciso: width, prop_referencia, Jaccard
+library(parallel)          # parallel processing of families
+library(GenomicRanges)     # precise overlap: width, prop_reference, Jaccard
 
 # =============================================================================
-# 1. CONFIGURACIÓN GENERAL
+# 1. GENERAL CONFIGURATION
 # =============================================================================
-CONFIG <- list(
-  ruta_entrada    = "",                                  # Set to your input folder (with HI/PA/MA subfolders per family),
-  ruta_salida     = file.path(getwd(), "results"),           # Output folder (created automatically),
-  ruta_rangos     = file.path(getwd(), "reference", "reference_ranges.xlsx"),  # Reference ranges file,
-  ruta_panel      = file.path(getwd(), "reference", "gene_panel.txt"),           # Gene panel file (.txt, comma-separated),
-  umbral_strict        = 0.70,
-  umbral_herencia      = 0.70,   # sim mínimo para herencia "Fuerte"   [sim = ovl / max(len_q, len_r)]
-  umbral_herencia_lax  = 0.60,   # sim mínimo para herencia "Probable" (rescatada por Jaccard)
-  umbral_jaccard       = 0.50,   # Jaccard mínimo requerido en el nivel "Probable"
-  margen_lateral       = 3e6,    # 3 Mb de desviación máxima permitida por cada lado
-  umbral_longitud_similar = 0.70,  # ratio mínimo min(len_h,len_p)/max(len_h,len_p) para match por gen sin solapamiento
-  deduplicar_regiones  = TRUE,   # TRUE = colapsar variantes similares (mismo chr+tipo, sim >= umbral_herencia)
-  # FALSE = conservar todas las variantes sin colapso
-  n_cores         = max(1L, detectCores(logical = FALSE) - 1L)  # núcleos físicos - 1
-)
+# CONFIG is only defined here if it has NOT already been set by the Shiny app.
+# When launched from the app, the app prepends its own CONFIG block (with the
+# user-supplied paths) before this script, so this block is skipped entirely.
+# When running the script standalone, this default block is used instead.
+if (!exists("CONFIG")) {
+  CONFIG <- list(
+    ruta_entrada    = "",                                  # Set to your input folder (with HI/PA/MA subfolders per family),
+    ruta_salida     = file.path(getwd(), "results"),       # Output folder (created automatically),
+    ruta_rangos     = file.path(getwd(), "reference", "reference_ranges.xlsx"),  # Reference ranges file,
+    ruta_panel      = file.path(getwd(), "reference", "gene_panel.txt"),         # Gene panel file (.txt, comma-separated),
+    umbral_strict        = 0.70,
+    umbral_herencia      = 0.70,   # minimum sim for "Strong" inheritance   [sim = ovl / max(len_q, len_r)]
+    umbral_herencia_lax  = 0.60,   # minimum sim for "Probable" inheritance (rescued by Jaccard)
+    umbral_jaccard       = 0.50,   # minimum Jaccard required at the "Probable" level
+    margen_lateral       = 3e6,    # 3 Mb maximum allowed deviation per side
+    umbral_longitud_similar = 0.70,  # minimum ratio min(len_h,len_p)/max(len_h,len_p) for gene-based match without overlap
+    deduplicar_regiones  = TRUE,   # TRUE = collapse similar variants (same chr+type, sim >= umbral_herencia)
+    # FALSE = keep all variants without collapsing
+    n_cores         = max(1L, detectCores(logical = FALSE) - 1L)  # physical cores - 1
+  )
+}
 if(!dir.exists(CONFIG$ruta_salida)) dir.create(CONFIG$ruta_salida, recursive = TRUE)
 
 # =============================================================================
-# 2. CARGA DE REFERENCIAS (CON VALIDACIÓN)
+# 2. LOADING REFERENCES (WITH VALIDATION)
 # =============================================================================
-cat(">>> Cargando bases de datos de referencia...\n")
+cat(">>> Loading reference databases...\n")
 
-# Cargar Rangosr
-if(!file.exists(CONFIG$ruta_rangos)) stop("❌ No se encuentra: ", CONFIG$ruta_rangos)
+# Load Ranges
+if(!file.exists(CONFIG$ruta_rangos)) stop("❌ File not found: ", CONFIG$ruta_rangos)
 
 df_ref_raw <- read_excel(CONFIG$ruta_rangos)
 dt_ref <- data.table(
@@ -44,47 +50,47 @@ dt_ref <- data.table(
   ref_end_estricto   = as.numeric(df_ref_raw[[7]]),
   ref_end_amplio     = as.numeric(df_ref_raw[[8]])
 )
-dt_ref <- dt_ref[!is.na(ref_start_amplio) & !is.na(ref_end_amplio) & 
+dt_ref <- dt_ref[!is.na(ref_start_amplio) & !is.na(ref_end_amplio) &
                    !is.na(ref_name) & ref_name != "" & ref_name != "Nombre_CNV"]
-cat("✓ Rangos cargados:", nrow(dt_ref), "\n")
+cat("✓ Ranges loaded:", nrow(dt_ref), "\n")
 
-# Cargar Genes SFARI
-if(!file.exists(CONFIG$ruta_panel)) stop("❌ No se encuentra: ", CONFIG$ruta_panel)
+# Load SFARI Genes
+if(!file.exists(CONFIG$ruta_panel)) stop("❌ File not found: ", CONFIG$ruta_panel)
 
 lineas_panel <- readLines(CONFIG$ruta_panel, warn = FALSE)
 genes_panel <- unique(toupper(trimws(unlist(strsplit(paste(lineas_panel, collapse = ","), ",")))))
 genes_panel <- genes_panel[genes_panel != ""]
-# Hash set: convierte el vector en environment para lookup O(1) en lugar de O(n)
+# Hash set: converts the vector into an environment for O(1) lookup instead of O(n)
 genes_panel_set <- new.env(hash = TRUE, parent = emptyenv())
 for(.g in genes_panel) assign(.g, TRUE, envir = genes_panel_set)
 rm(.g)
-cat("✓ Genes del panel cargados:", length(genes_panel), "\n")
+cat("✓ Panel genes loaded:", length(genes_panel), "\n")
 
 # =============================================================================
-# 3. FUNCIÓN DE DEDUPLICACIÓN POR REGIONES SIMILARES
+# 3. DEDUPLICATION FUNCTION FOR SIMILAR REGIONS
 # =============================================================================
-# Lógica: dentro de cada resultado de familia, si dos o más variantes solapan
-# con sim_maxlen >= umbral_herencia en el mismo cromosoma y mismo tipo de SV/CNV,
-# se consideran "la misma región". De ese grupo se conservan:
-#   - Las filas con Tipo_Herencia distinta de "De novo", si las hay.
-#   - Si todas son "De novo" o NA, se conserva la de mayor ranking_numeric.
-# Las filas "split" siguen siempre a su fila "full" correspondiente.
+# Logic: within each family result, if two or more variants overlap
+# with sim_maxlen >= umbral_herencia on the same chromosome and same SV/CNV type,
+# they are considered "the same region". From that group, the following are kept:
+#   - Rows with Tipo_Herencia other than "De novo", if any exist.
+#   - If all are "De novo" or NA, the one with the highest ranking_numeric is kept.
+# "split" rows always follow their corresponding "full" row.
 #
-# Casos especiales de herencia:
-#   - Paterna + Materna similares → se fusionan en Conjunta (no se descarta ninguna)
-#   - Herencias distintas no fusionables (p.ej. Paterna vs De novo) → NO se colapsan,
-#     son eventos biológicamente distintos aunque sus coordenadas solapen
-#   - Igual herencia o ambas De novo/NA → colapso normal, se conserva la de mayor ranking
+# Special inheritance cases:
+#   - Paternal + Maternal similar → merged into Combined (neither is discarded)
+#   - Non-mergeable different inheritances (e.g. Paternal vs De novo) → NOT collapsed,
+#     they are biologically distinct events even if their coordinates overlap
+#   - Same inheritance or both De novo/NA → normal collapse, highest-ranking one is kept
 #
-# Algoritmo greedy por pares directos (no Union-Find):
-#   Solo se elimina una variante si tiene sim DIRECTO >= umbral con su representante.
-#   Evita colapsos transitivos: A~B y B~C no implica colapsar A con C si sim(A,C)<umbral.
+# Greedy algorithm by direct pairs (not Union-Find):
+#   A variant is only removed if it has a DIRECT sim >= threshold with its representative.
+#   Avoids transitive collapses: A~B and B~C does not imply collapsing A with C if sim(A,C)<threshold.
 # ---------------------------------------------------------------------------
 
-# Función auxiliar: extraer la familia base de herencia (sin genotipo ni "(Probable)")
+# Helper function: extract the base inheritance family (without genotype or "(Probable)")
 .her_base <- function(x) {
   if (is.na(x)) return(NA_character_)
-  # Quitar el sufijo " [GT]" o " [GT | GT]" y "(Probable)"
+  # Remove the suffix " [GT]" or " [GT | GT]" and "(Probable)"
   x <- trimws(sub("\\s*\\[.*", "", x))
   x <- trimws(sub("\\s*\\(Probable\\)", "", x))
   x
@@ -96,18 +102,18 @@ deduplicar_regiones_similares <- function(dt, umbral_sim = CONFIG$umbral_herenci
   tiene_modo  <- "Annotation_mode" %in% colnames(dt)
   tiene_annot <- "AnnotSV_ID"      %in% colnames(dt)
   
-  # Trabajar solo sobre filas "full"; las "split" se reconstruyen al final por AnnotSV_ID
+  # Work only on "full" rows; "split" rows are reconstructed at the end by AnnotSV_ID
   dt_full <- if (tiene_modo) dt[Annotation_mode == "full"] else copy(dt)
   if (nrow(dt_full) <= 1) return(dt)
   
-  # --- Construir metadatos por fila ---
+  # --- Build per-row metadata ---
   n         <- nrow(dt_full)
   fn_row    <- seq_len(n)
   sv_up     <- toupper(as.character(dt_full$SV_type))
   tipo_vec  <- fcase(
     grepl("DEL|LOSS", sv_up), "DEL",
     grepl("DUP|GAIN", sv_up), "DUP",
-    default = "OTRO"
+    default = "OTHER"
   )
   start_vec <- as.integer(dt_full$SV_start)
   end_vec   <- as.integer(dt_full$SV_end)
@@ -115,13 +121,13 @@ deduplicar_regiones_similares <- function(dt, umbral_sim = CONFIG$umbral_herenci
   chr_vec   <- toupper(trimws(gsub("CHR", "", as.character(dt_full$SV_chrom))))
   
   her_vec   <- as.character(dt_full$Tipo_Herencia)
-  her_base  <- vapply(her_vec, .her_base, character(1L))  # familia base sin decoración
-  is_denovo <- !is.na(her_vec) & her_base %in% c("De novo", "Desconocida")
+  her_base  <- vapply(her_vec, .her_base, character(1L))  # base family without decoration
+  is_denovo <- !is.na(her_vec) & her_base %in% c("De novo", "Unknown")
   rank_num  <- suppressWarnings(as.numeric(dt_full$ranking_numeric))
   rank_num[is.na(rank_num)] <- -Inf
   tiebreak  <- if (tiene_annot) as.character(dt_full$AnnotSV_ID) else as.character(fn_row)
   
-  # --- Calcular todos los pares con solapamiento ---
+  # --- Compute all pairs with overlap ---
   gr <- GRanges(
     seqnames = chr_vec,
     ranges   = IRanges(start = start_vec, end = end_vec)
@@ -134,27 +140,27 @@ deduplicar_regiones_similares <- function(dt, umbral_sim = CONFIG$umbral_herenci
   hi <- queryHits(hits)
   hj <- subjectHits(hits)
   
-  # Filtrar: mismo tipo conocido
-  tipo_ok <- tipo_vec[hi] == tipo_vec[hj] & tipo_vec[hi] != "OTRO"
+  # Filter: same known type
+  tipo_ok <- tipo_vec[hi] == tipo_vec[hj] & tipo_vec[hi] != "OTHER"
   hi <- hi[tipo_ok];  hj <- hj[tipo_ok]
   if (length(hi) == 0) return(dt)
   
-  # Calcular sim
+  # Compute sim
   ovl_w <- pmax(0L, pmin(end_vec[hj], end_vec[hi]) - pmax(start_vec[hj], start_vec[hi]) + 1L)
   sim_v <- ovl_w / pmax(len_vec[hi], len_vec[hj])
   
-  # Filtrar por umbral
+  # Filter by threshold
   ok    <- sim_v >= umbral_sim
   hi    <- hi[ok];  hj <- hj[ok];  sim_v <- sim_v[ok]
   if (length(hi) == 0) return(dt)
   
-  # Ordenar: sim desc, desempate determinista
+  # Sort: sim desc, deterministic tiebreak
   ord   <- order(-sim_v, tiebreak[hi], tiebreak[hj])
   hi    <- hi[ord];  hj <- hj[ord];  sim_v <- sim_v[ord]
   
-  # --- Greedy: procesar cada par ---
+  # --- Greedy: process each pair ---
   eliminado <- logical(n)
-  # fusionar[i] = índice j cuya herencia debe fusionarse en i (caso Paterna+Materna→Conjunta)
+  # fusionar[i] = index j whose inheritance must be merged into i (Paternal+Maternal→Combined case)
   fusionar  <- integer(n)
   
   for (k in seq_along(hi)) {
@@ -164,37 +170,37 @@ deduplicar_regiones_similares <- function(dt, umbral_sim = CONFIG$umbral_herenci
     hi_base <- her_base[i]
     hj_base <- her_base[j]
     
-    # ---- Caso 1: Paterna + Materna (o viceversa) → fusionar en Conjunta ----
-    # Son la misma variante vista desde dos progenitores distintos.
-    # Se conserva i, se marca j para eliminar, y se anota que i debe heredar
-    # también la información de j para construir la etiqueta Conjunta.
+    # ---- Case 1: Paternal + Maternal (or vice versa) → merge into Combined ----
+    # They are the same variant seen from two different parents.
+    # i is kept, j is marked for removal, and i is noted to also absorb
+    # j's information to build the Combined label.
     es_fusion_conjunta <- (
       (!is.na(hi_base) & !is.na(hj_base)) &&
-        ((hi_base == "Paterna" & hj_base == "Materna") ||
-           (hi_base == "Materna" & hj_base == "Paterna"))
+        ((hi_base == "Paternal" & hj_base == "Maternal") ||
+           (hi_base == "Maternal" & hj_base == "Paternal"))
     )
     if (es_fusion_conjunta) {
-      # Asegurar que i sea Paterna y j Materna para unificar la lógica de fusión
-      if (hi_base == "Materna") { tmp <- i; i <- j; j <- tmp }
+      # Ensure i is Paternal and j is Maternal to unify merge logic
+      if (hi_base == "Maternal") { tmp <- i; i <- j; j <- tmp }
       eliminado[j]  <- TRUE
-      fusionar[i]   <- j    # i (Paterna) absorbe j (Materna) → Conjunta
+      fusionar[i]   <- j    # i (Paternal) absorbs j (Maternal) → Combined
       next
     }
     
-    # ---- Caso 2: herencias distintas NO fusionables → NO colapsar ----
-    # Ejemplos: Paterna vs De novo, Materna vs Conjunta, etc.
-    # Son eventos biológicamente distintos; se conservan ambas.
-    her_i_conocida <- !is.na(hi_base) & !hi_base %in% c("De novo", "Desconocida")
-    her_j_conocida <- !is.na(hj_base) & !hj_base %in% c("De novo", "Desconocida")
+    # ---- Case 2: non-mergeable different inheritances → DO NOT collapse ----
+    # Examples: Paternal vs De novo, Maternal vs Combined, etc.
+    # They are biologically distinct events; both are kept.
+    her_i_conocida <- !is.na(hi_base) & !hi_base %in% c("De novo", "Unknown")
+    her_j_conocida <- !is.na(hj_base) & !hj_base %in% c("De novo", "Unknown")
     if (her_i_conocida && her_j_conocida && hi_base != hj_base) {
-      cat(paste0("      [Dedup] Par no colapsado: herencias distintas (",
-                 hi_base, " vs ", hj_base, ") con sim=", round(sim_v[k], 4), "\n"))
+      cat(paste0("      [Dedup] Pair not collapsed: different inheritances (",
+                 hi_base, " vs ", hj_base, ") with sim=", round(sim_v[k], 4), "\n"))
       next
     }
     
-    # ---- Caso 3: colapso normal ----
-    # Misma herencia, ambas De novo/NA, o una conocida y otra sin información.
-    # Prioridad: (1) no-denovo > denovo, (2) mayor rank, (3) tiebreak determinista
+    # ---- Case 3: normal collapse ----
+    # Same inheritance, both De novo/NA, or one known and the other without information.
+    # Priority: (1) non-denovo > denovo, (2) higher rank, (3) deterministic tiebreak
     i_gana <- if (!is_denovo[i] && is_denovo[j]) {
       TRUE
     } else if (is_denovo[i] && !is_denovo[j]) {
@@ -211,41 +217,41 @@ deduplicar_regiones_similares <- function(dt, umbral_sim = CONFIG$umbral_herenci
   n_eliminadas <- sum(eliminado)
   if (n_eliminadas == 0L) return(dt)
   
-  cat(paste0("      [Dedup] Colapsadas ", n_eliminadas,
-             " variante(s) (mismo chr+tipo, sim >= ", umbral_sim, ")\n"))
+  cat(paste0("      [Dedup] Collapsed ", n_eliminadas,
+             " variant(s) (same chr+type, sim >= ", umbral_sim, ")\n"))
   
-  # --- Aplicar fusiones Conjunta ---
-  # Para cada i con fusionar[i] > 0: i es Paterna, j=fusionar[i] es Materna.
-  # Construir la etiqueta Conjunta combinando genotipos de ambas.
+  # --- Apply Combined merges ---
+  # For each i with fusionar[i] > 0: i is Paternal, j=fusionar[i] is Maternal.
+  # Build the Combined label by combining genotypes from both.
   for (i in which(fusionar > 0L)) {
     j       <- fusionar[i]
-    her_i   <- her_vec[i]   # "Paterna [GT]" o "Paterna (Probable) [GT]"
-    her_j   <- her_vec[j]   # "Materna [GT]" o "Materna (Probable) [GT]"
+    her_i   <- her_vec[i]   # "Paternal [GT]" or "Paternal (Probable) [GT]"
+    her_j   <- her_vec[j]   # "Maternal [GT]" or "Maternal (Probable) [GT]"
     
-    # Extraer genotipo de cada etiqueta: lo que hay entre [ ]
+    # Extract genotype from each label: what is between [ ]
     gt_pa  <- regmatches(her_i, regexpr("(?<=\\[)[^\\]]+(?=\\])", her_i, perl = TRUE))
     gt_ma  <- regmatches(her_j, regexpr("(?<=\\[)[^\\]]+(?=\\])", her_j, perl = TRUE))
     gt_pa  <- if (length(gt_pa) > 0) gt_pa else "?"
     gt_ma  <- if (length(gt_ma) > 0) gt_ma else "?"
     
-    # Nivel de confianza: si alguna de las dos es Probable → Conjunta (Probable)
+    # Confidence level: if either is Probable → Combined (Probable)
     es_probable <- grepl("Probable", her_i, fixed = TRUE) ||
       grepl("Probable", her_j, fixed = TRUE)
     etiqueta <- if (es_probable) {
-      paste0("Conjunta (Probable) [", gt_pa, " | ", gt_ma, "]")
+      paste0("Combined (Probable) [", gt_pa, " | ", gt_ma, "]")
     } else {
-      paste0("Conjunta [", gt_pa, " | ", gt_ma, "]")
+      paste0("Combined [", gt_pa, " | ", gt_ma, "]")
     }
     
     dt_full[fn_row == i, Tipo_Herencia := etiqueta]
     
-    # Fusionar también IDs de coincidencia si existen las columnas
+    # Also merge match IDs if the columns exist
     if ("IDs_Coincidencia_PA" %in% colnames(dt_full) &&
         "IDs_Coincidencia_MA" %in% colnames(dt_full)) {
-      # i era Paterna: tiene IDs_PA pero no IDs_MA → tomar IDs_MA de j (que era Materna)
+      # i was Paternal: has IDs_PA but not IDs_MA → take IDs_MA from j (which was Maternal)
       ids_ma_j <- dt_full$IDs_Coincidencia_MA[fn_row == j]
       ids_pa_i <- dt_full$IDs_Coincidencia_PA[fn_row == i]
-      # Si j (Materna) tenía IDs_PA porque también era Conjunta parcial, conservar ambos
+      # If j (Maternal) had IDs_PA because it was also partially Combined, keep both
       ids_pa_j <- dt_full$IDs_Coincidencia_PA[fn_row == j]
       pa_final <- paste(na.omit(unique(c(ids_pa_i, ids_pa_j))), collapse = ";")
       pa_final <- if (nchar(pa_final) == 0) NA_character_ else pa_final
@@ -255,14 +261,14 @@ deduplicar_regiones_similares <- function(dt, umbral_sim = CONFIG$umbral_herenci
     }
   }
   
-  # --- Reconstruir resultado ---
+  # --- Reconstruct result ---
   filas_conservar <- fn_row[!eliminado]
   
   if (tiene_modo && tiene_annot) {
     ids_conservar <- dt_full$AnnotSV_ID[filas_conservar]
-    # Propagar Tipo_Herencia fusionado a las filas "split" correspondientes
+    # Propagate merged Tipo_Herencia to the corresponding "split" rows
     dt_result <- dt[AnnotSV_ID %in% ids_conservar]
-    # Actualizar herencia en dt_result para los IDs que fueron fusionados
+    # Update inheritance in dt_result for IDs that were merged
     ids_fusionados <- dt_full$AnnotSV_ID[fn_row %in% which(fusionar > 0L)]
     if (length(ids_fusionados) > 0) {
       her_fusion_map <- dt_full[fn_row %in% which(fusionar > 0L),
@@ -286,76 +292,76 @@ deduplicar_regiones_similares <- function(dt, umbral_sim = CONFIG$umbral_herenci
 }
 
 # =============================================================================
-# 4. FUNCIÓN OPTIMIZADA DE PROCESAMIENTO
+# 4. OPTIMISED PROCESSING FUNCTION
 # =============================================================================
 procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_panel) {
   
-  # --- VALIDACIÓN DE ENTRADA ---
+  # --- INPUT VALIDATION ---
   if(is.na(ruta_hi) || !file.exists(ruta_hi)) return(NULL)
   
-  cat(paste0("   -> Analizando ", MODO, "...\n"))
+  cat(paste0("   -> Analysing ", MODO, "...\n"))
   
-  # --- CARGA OPTIMIZADA ---
-  # fill=TRUE: AnnotSV puede generar campos con contenido complejo (comas, puntos y coma,
-  # saltos de línea en fenotipos OMIM, etc.) que desplazan columnas en filas concretas.
-  # fill=TRUE tolera filas con distinto número de campos en lugar de abortar o desplazar.
+  # --- OPTIMISED LOADING ---
+  # fill=TRUE: AnnotSV can generate fields with complex content (commas, semicolons,
+  # line breaks in OMIM phenotypes, etc.) that shift columns in specific rows.
+  # fill=TRUE tolerates rows with different numbers of fields instead of aborting or shifting.
   dt_annotsv <- tryCatch({
     fread(ruta_hi, header = TRUE, quote = "", fill = TRUE, showProgress = FALSE)
   }, error = function(e) {
-    cat(paste("      [ERROR leyendo archivo]:", e$message, "\n"))
+    cat(paste("      [ERROR reading file]:", e$message, "\n"))
     return(NULL)
   })
   
   if(is.null(dt_annotsv) || nrow(dt_annotsv) == 0) return(NULL)
   
-  # Snapshot completo: índice de fila + todas las columnas originales, ANTES de cualquier filtro.
-  # Al final del pipeline se usa para recuperar los valores reales de cualquier columna
-  # que se haya perdido en los pasos intermedios.
+  # Full snapshot: row index + all original columns, BEFORE any filter.
+  # At the end of the pipeline it is used to recover the real values of any column
+  # that was lost in intermediate steps.
   dt_annotsv[, .src_row_ := .I]
-  dt_annotsv_src  <- copy(dt_annotsv)        # todas las columnas, todos los valores
+  dt_annotsv_src  <- copy(dt_annotsv)        # all columns, all values
   cols_originales <- setdiff(names(dt_annotsv), ".src_row_")
-  cat(paste0("      Columnas leídas: ", length(cols_originales), "\n"))
+  cat(paste0("      Columns read: ", length(cols_originales), "\n"))
   
-  # Cargar progenitores de forma segura
+  # Load parents safely
   dt_padre <- if(!is.na(ruta_pa) && file.exists(ruta_pa)) {
-    tryCatch(fread(ruta_pa, header=TRUE, quote="", fill=TRUE, showProgress=FALSE), 
+    tryCatch(fread(ruta_pa, header=TRUE, quote="", fill=TRUE, showProgress=FALSE),
              error = function(e) data.table())
   } else data.table()
   
   dt_madre <- if(!is.na(ruta_ma) && file.exists(ruta_ma)) {
-    tryCatch(fread(ruta_ma, header=TRUE, quote="", fill=TRUE, showProgress=FALSE), 
+    tryCatch(fread(ruta_ma, header=TRUE, quote="", fill=TRUE, showProgress=FALSE),
              error = function(e) data.table())
   } else data.table()
   
   dt_annotsv[, ranking_numeric := suppressWarnings(as.numeric(as.character(AnnotSV_ranking_score)))]
   
-  # --- FILTRO DE FRECUENCIA POBLACIONAL (PRIMER FILTRO) ---
-  # Condición 1: frecuencia en bases de datos de CNVs benignos según tipo de SV
+  # --- POPULATION FREQUENCY FILTER (FIRST FILTER) ---
+  # Condition 1: frequency in benign CNV databases by SV type
   #   DEL → B_loss_AFmax | DUP → B_gain_AFmax | INS → B_ins_AFmax | INV → B_inv_AFmax
-  #   Pasa si la celda está vacía/NA o el valor ≤ 0.01
-  # Condición 2: frecuencia en cohorte Illumina DRAGEN (similar counts)
-  #   Valor de Illumina_DRAGEN.similar.counts dividido entre 1061
-  #   Pasa si la celda está vacía/NA o el cociente ≤ 0.01
-  # Condición 3: conteo exacto en cohorte Illumina DRAGEN (exact counts)
-  #   Valor directo de Illumina_DRAGEN.exact.counts (entero, sin parseo ni normalización)
-  #   Pasa si la celda está vacía/NA o el valor ≤ 10
-  # Se conservan las filas que cumplen LAS TRES condiciones (celdas vacías/NA pasan)
+  #   Passes if the cell is empty/NA or the value is <= 0.01
+  # Condition 2: frequency in the Illumina DRAGEN cohort (similar counts)
+  #   Value of Illumina_DRAGEN.similar.counts divided by 1061
+  #   Passes if the cell is empty/NA or the quotient is <= 0.01
+  # Condition 3: exact count in the Illumina DRAGEN cohort (exact counts)
+  #   Direct value of Illumina_DRAGEN.exact.counts (integer, no parsing or normalisation)
+  #   Passes if the cell is empty/NA or the value is <= 10
+  # Rows that meet ALL THREE conditions are kept (empty/NA cells pass)
   {
-    # Tipo de SV por fila (vectorizado)
+    # SV type per row (vectorised)
     sv_type_upper <- toupper(as.character(dt_annotsv$SV_type))
     tipo_sv <- fcase(
       grepl("DEL", sv_type_upper), "DEL",
       grepl("DUP", sv_type_upper), "DUP",
       grepl("INS", sv_type_upper), "INS",
       grepl("INV", sv_type_upper), "INV",
-      default = "OTRO"
+      default = "OTHER"
     )
     
-    # Mapa tipo → columna AF
+    # Type → AF column map
     col_af_map <- c(DEL = "B_loss_AFmax", DUP = "B_gain_AFmax",
                     INS = "B_ins_AFmax",  INV = "B_inv_AFmax")
     
-    # Extraer valor AF según tipo de cada fila
+    # Extract AF value by type for each row
     extraer_af <- function(dt, tipo_vec, col_map) {
       af_vals <- rep(NA_real_, nrow(dt))
       for(tipo in names(col_map)) {
@@ -371,27 +377,27 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     af_vals     <- extraer_af(dt_annotsv, tipo_sv, col_af_map)
     mask_af     <- is.na(af_vals) | af_vals <= 0.01
     
-    # Condición 2: Illumina DRAGEN similar counts / 1061
-    # La columna tiene formato "DEL=2343;DUP=9485;INS=748;INV=7374;TRA=738"
-    # Se extrae el valor del tipo de SV de cada fila, se suma con sus posibles
-    # sub-tipos (p.ej. todos los que contienen "DEL") y se divide entre 1061.
-    # Pasa si la celda está vacía/NA o el cociente ≤ 0.01
+    # Condition 2: Illumina DRAGEN similar counts / 1061
+    # The column has format "DEL=2343;DUP=9485;INS=748;INV=7374;TRA=738"
+    # The value for the SV type of each row is extracted, summed with possible
+    # sub-types (e.g. all containing "DEL") and divided by 1061.
+    # Passes if the cell is empty/NA or the quotient is <= 0.01
     if("Illumina_DRAGEN.similar.counts" %in% colnames(dt_annotsv)) {
       dragen_str <- as.character(dt_annotsv$Illumina_DRAGEN.similar.counts)
       
-      # Para cada fila: parsear el string key=value y sumar los valores cuya
-      # clave contenga el tipo de SV de esa fila (p.ej. tipo "DEL" coincide
-      # con claves "DEL", "DEL_ALU", etc.)
+      # For each row: parse the key=value string and sum values whose
+      # key contains the SV type of that row (e.g. type "DEL" matches
+      # keys "DEL", "DEL_ALU", etc.)
       dragen_counts <- mapply(function(sv_str, sv_tipo) {
-        # Celda vacía o tipo desconocido → NA (pasa el filtro)
-        if(is.na(sv_str) || sv_str == "" || sv_str == "." || sv_tipo == "OTRO")
+        # Empty cell or unknown type → NA (passes the filter)
+        if(is.na(sv_str) || sv_str == "" || sv_str == "." || sv_tipo == "OTHER")
           return(NA_real_)
-        # Separar pares key=value
+        # Split key=value pairs
         pares <- unlist(strsplit(sv_str, ";", fixed = TRUE))
-        # Extraer clave y valor de cada par
+        # Extract key and value from each pair
         claves  <- sub("=.*$", "", pares)
         valores <- suppressWarnings(as.numeric(sub("^[^=]+=", "", pares)))
-        # Sumar solo los valores cuya clave contenga el tipo de SV de la fila
+        # Sum only values whose key contains the row's SV type
         idx_match <- grepl(sv_tipo, claves, fixed = TRUE)
         if(!any(idx_match)) return(NA_real_)
         sum(valores[idx_match], na.rm = TRUE)
@@ -400,55 +406,56 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
       dragen_freq <- as.numeric(dragen_counts) / 1061
       mask_dragen <- is.na(dragen_freq) | dragen_freq <= 0.01
     } else {
-      mask_dragen <- rep(TRUE, nrow(dt_annotsv))   # columna ausente → pasa
+      mask_dragen <- rep(TRUE, nrow(dt_annotsv))   # column absent → passes
     }
     
-    # Condición 3: Illumina DRAGEN exact counts
-    # Conteo directo (entero) — no requiere parseo ni normalización.
-    # Pasa si la celda está vacía/NA o el valor ≤ 10.
+    # Condition 3: Illumina DRAGEN exact counts
+    # Direct count (integer) — no parsing or normalisation required.
+    # Passes if the cell is empty/NA or the value is <= 10.
     if("Illumina_DRAGEN.exact.counts" %in% colnames(dt_annotsv)) {
       exact_counts <- suppressWarnings(
         as.numeric(as.character(dt_annotsv$Illumina_DRAGEN.exact.counts))
       )
       mask_exact <- is.na(exact_counts) | exact_counts <= 10
     } else {
-      mask_exact <- rep(TRUE, nrow(dt_annotsv))   # columna ausente → pasa
+      mask_exact <- rep(TRUE, nrow(dt_annotsv))   # column absent → passes
     }
     
     mask_freq   <- mask_af & mask_dragen & mask_exact
     n_antes     <- nrow(dt_annotsv)
     dt_annotsv  <- dt_annotsv[mask_freq]
-    cat(paste0("      Filtro frecuencia: ", n_antes, " → ", nrow(dt_annotsv), " variantes\n"))
+    cat(paste0("      Frequency filter: ", n_antes, " → ", nrow(dt_annotsv), " variants\n"))
   }
   
   if(nrow(dt_annotsv) == 0) {
-    cat("      (Sin variantes tras filtro de frecuencia)\n")
+    cat("      (No variants after frequency filter)\n")
     return(NULL)
   }
   
-  # --- FILTRO DE TAMAÑO MÍNIMO (solo SVs) ---
-  # Se aplica únicamente al modo SV. Elimina variantes cuyo tamaño absoluto
-  # sea menor de 50 pb (DEL, DUP, INS, INV).
-  # El tamaño se calcula como abs(SV_end - SV_start). Se usa valor absoluto
-  # porque en algunas notaciones SV_end puede ser menor que SV_start (p.ej. INS).
-  # Filas con coordenadas inválidas (NA) se conservan: el filtro de calidad
-  # posterior las descartará sin generar pérdidas silenciosas.
+  # --- MINIMUM SIZE FILTER (SVs only) ---
+  # Applied only in SV mode. Removes variants whose absolute size
+  # is less than 50 bp (DEL, DUP, INS, INV).
+  # Size is calculated as abs(SV_end - SV_start). Absolute value is used
+  # because in some notations SV_end can be less than SV_start (e.g. INS).
+  # Rows with invalid (NA) coordinates are kept: the subsequent quality filter
+  # will discard them without generating silent losses.
   if(MODO == "SV") {
     sv_size  <- abs(as.numeric(dt_annotsv$SV_end) - as.numeric(dt_annotsv$SV_start))
     mask_tam <- is.na(sv_size) | sv_size >= 50
     n_antes_tam     <- nrow(dt_annotsv)
     dt_annotsv      <- dt_annotsv[mask_tam]
     n_filtradas_tam <- n_antes_tam - nrow(dt_annotsv)
-    cat(paste0("      Filtro tamaño (<50 pb): ", n_antes_tam, " → ",
-               nrow(dt_annotsv), " variantes",
-               if(n_filtradas_tam > 0) paste0(" (eliminadas: ", n_filtradas_tam, ")") else "",
+    cat(paste0("      Size filter (<50 bp): ", n_antes_tam, " → ",
+               nrow(dt_annotsv), " variants",
+               if(n_filtradas_tam > 0) paste0(" (removed: ", n_filtradas_tam, ")") else "",
                "\n"))
     if(nrow(dt_annotsv) == 0) {
-      cat("      (Sin variantes tras filtro de tamaño)\n")
+      cat("      (No variants after size filter)\n")
       return(NULL)
     }
   }
-  # --- MARCADO DE GENES SFARI (TOTALMENTE VECTORIZADO) ---
+  
+  # --- SFARI GENE FLAGGING (FULLY VECTORISED) ---
   {
     gene_strings <- toupper(trimws(as.character(dt_annotsv$Gene_name)))
     gene_strings[is.na(gene_strings) | gene_strings == "" | gene_strings == "."] <- ""
@@ -460,9 +467,9 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     }, logical(1L))]
   }
   
-  # --- FILTRO DE CALIDAD OPTIMIZADO ---
+  # --- OPTIMISED QUALITY FILTER ---
   if(!"Samples_ID" %in% colnames(dt_annotsv)) {
-    cat("      ⚠ Columna Samples_ID no encontrada\n")
+    cat("      \u26a0 Column Samples_ID not found\n")
     return(NULL)
   }
   
@@ -474,8 +481,8 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
       rows <- which(sample_ids == sid)
       if(sid %in% colnames(dt)) raw_gt_values[rows] <- as.character(dt[[sid]][rows])
     }
-    # Filtro QUALITY: pasa si la columna no existe, el valor es NA, o el valor > 30.
-    # Se calcula una sola vez y se aplica en ambas ramas (CNV y SV).
+    # QUALITY filter: passes if the column does not exist, the value is NA, or the value > 30.
+    # Computed once and applied in both branches (CNV and SV).
     quality_col <- if("QUALITY" %in% colnames(dt)) {
       suppressWarnings(as.numeric(as.character(dt$QUALITY)))
     } else {
@@ -494,11 +501,11 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
       ft_part    <- vapply(parts, function(x) if(length(x) >= 2L) x[2L] else NA_character_, character(1L))
       filter_col <- if("FILTER" %in% colnames(dt)) as.character(dt$FILTER) else rep("PASS", nrow(dt))
       annot_col  <- if("Annotation_mode" %in% colnames(dt)) as.character(dt$Annotation_mode) else rep("full", nrow(dt))
-      # Nota: se filtra por Annotation_mode == "full" aquí para SVs porque las filas
-      # "split" no tienen formato GT:FT en su columna de muestra y no deben evaluarse
-      # por calidad individualmente — su inclusión se hereda de la fila "full" asociada.
+      # Note: filtered by Annotation_mode == "full" here for SVs because "split" rows
+      # do not have GT:FT format in their sample column and should not be evaluated
+      # for quality individually — their inclusion is inherited from the associated "full" row.
       return((gt_part %in% c("0/1", "1/1", "./1")) &
-               (ft_part %in% c("PASS", "High Quality")) &   # consistente con modo CNV
+               (ft_part %in% c("PASS", "High Quality")) &   # consistent with CNV mode
                (filter_col %in% c("PASS", "High Quality")) &
                (annot_col  == "full") &
                mask_quality_score)
@@ -509,19 +516,19 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
   dt_fase1 <- dt_annotsv[mask_quality]
   
   if(nrow(dt_fase1) == 0) {
-    cat("      (Sin variantes tras filtro calidad)\n")
+    cat("      (No variants after quality filter)\n")
     return(NULL)
   }
   
-  # Filtro de progenitores: se trabaja únicamente con filas "full" para no contar
-  # la misma SV múltiples veces. Adicionalmente, se aplica filtro de genotipo
-  # (heterocigoto / homocigoto) para excluir variantes de baja calidad o sin
-  # llamada válida, lo que reduce falsos positivos de herencia entre batches.
+  # Parent filter: works only on "full" rows to avoid counting the same
+  # SV multiple times. Additionally, a genotype filter is applied
+  # (heterozygous / homozygous) to exclude low-quality or missing-call variants,
+  # reducing false-positive inheritance across batches.
   filtrar_progenitor <- function(dt) {
     if(nrow(dt) == 0) return(data.table())
     dt_f <- if("Annotation_mode" %in% colnames(dt)) dt[Annotation_mode == "full"] else dt
     if(nrow(dt_f) == 0) return(data.table())
-    # Aplicar filtro de genotipo: conservar solo variantes con GT hetero/homo válido
+    # Apply genotype filter: keep only variants with valid het/hom GT
     if("Samples_ID" %in% colnames(dt_f)) {
       gt_vec_prog <- rep(NA_character_, nrow(dt_f))
       sids <- as.character(dt_f$Samples_ID)
@@ -541,12 +548,12 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
   dt_padre_filtrado <- filtrar_progenitor(copy(dt_padre))
   dt_madre_filtrado <- filtrar_progenitor(copy(dt_madre))
   
-  # --- FILTRO DE SOLAPAMIENTO CON GenomicRanges ---
-  # Métrica de similitud: sim = overlap / max(len_query, len_ref)
-  # Equivalente a: sim = 1 - d, donde d = 1 - (overlap / max(len_q, len_r))
-  # según: ov <- pintersect(gr[qh], gr[sh])
-  #        max_len <- pmax(width(gr[qh]), width(gr[sh]))
-  #        d <- 1 - (width(ov) / max_len)
+  # --- OVERLAP FILTER WITH GenomicRanges ---
+  # Similarity metric: sim = overlap / max(len_query, len_ref)
+  # Equivalent to: sim = 1 - d, where d = 1 - (overlap / max(len_q, len_r))
+  # as per: ov <- pintersect(gr[qh], gr[sh])
+  #         max_len <- pmax(width(gr[qh]), width(gr[sh]))
+  #         d <- 1 - (width(ov) / max_len)
   dt_fase1[, idx_original := .I]
   
   dt_query <- dt_fase1[, .(
@@ -557,12 +564,12 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     query_type  = fcase(
       grepl("DEL", toupper(SV_type)), "DEL",
       grepl("DUP", toupper(SV_type)), "DUP",
-      default = "OTRO"
+      default = "OTHER"
     )
   )]
   dt_query[, query_length := query_end - query_start + 1L]
   
-  # Construir GRanges para query y referencia
+  # Build GRanges for query and reference
   gr_query <- GRanges(
     seqnames     = dt_query$ref_chr,
     ranges       = IRanges(start = dt_query$query_start, end = dt_query$query_end),
@@ -592,12 +599,12 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     q_len   <- gr_query$query_length[q_idx]
     r_len   <- gr_ref$ref_length[s_idx]
     
-    # --- Lógica de overlap: d = 1 - (width(pintersect) / pmax(width_q, width_r)) ---
-    # pintersect equivalente vectorizado: ancho de la intersección entre cada par
+    # --- Overlap logic: d = 1 - (width(pintersect) / pmax(width_q, width_r)) ---
+    # Vectorised pintersect equivalent: width of intersection for each pair
     ovl_width <- pmax(0L, pmin(r_end, q_end) - pmax(r_start, q_start) + 1L)
     max_len   <- pmax(q_len, r_len)                        # pmax(width_query, width_ref)
     sim_maxlen <- ovl_width / max_len                      # sim = 1 - d = overlap / max_len
-    # Jaccard se mantiene como métrica complementaria
+    # Jaccard kept as complementary metric
     union_len  <- q_len + r_len - ovl_width
     jaccard    <- ovl_width / union_len
     
@@ -614,29 +621,29 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
       ref_length         = r_len,
       ref_start_estricto = gr_ref$ref_start_estricto[s_idx],
       ref_end_estricto   = gr_ref$ref_end_estricto[s_idx],
-      # --- métricas de overlap ---
-      overlap_width      = ovl_width,                      # pb de intersección
-      prop_referencia    = ovl_width / r_len,              # fracción cubierta del rango de referencia
-      sim_maxlen         = sim_maxlen,                     # overlap / max(len_q, len_r)  [métrica principal]
-      jaccard            = jaccard,                        # Jaccard = intersección / unión [métrica secundaria]
-      desv_izq           = r_start - q_start,   # positivo: query empieza antes que ref (desborde izq)
-      desv_der           = q_end   - r_end        # positivo: query acaba después que ref (desborde der)
+      # --- overlap metrics ---
+      overlap_width      = ovl_width,                      # bp of intersection
+      prop_referencia    = ovl_width / r_len,              # fraction of the reference range covered
+      sim_maxlen         = sim_maxlen,                     # overlap / max(len_q, len_r)  [main metric]
+      jaccard            = jaccard,                        # Jaccard = intersection / union [secondary metric]
+      desv_izq           = r_start - q_start,   # positive: query starts before ref (left overhang)
+      desv_der           = q_end   - r_end       # positive: query ends after ref (right overhang)
     )
     
-    # Asignar nivel de confianza usando sim_maxlen como criterio principal
-    # (equivalente a 1 - d del código de referencia):
-    #   Fuerte:   sim >= umbral_herencia
+    # Assign confidence level using sim_maxlen as the primary criterion
+    # (equivalent to 1 - d from the reference code):
+    #   Strong:   sim >= umbral_herencia
     #   Probable: sim >= umbral_herencia_lax  AND  Jaccard >= umbral_jaccard
     dt_overlap[, Confianza_Region := fcase(
-      sim_maxlen >= CONFIG$umbral_herencia,                                                "Fuerte",
+      sim_maxlen >= CONFIG$umbral_herencia,                                                "Strong",
       sim_maxlen >= CONFIG$umbral_herencia_lax & jaccard >= CONFIG$umbral_jaccard,         "Probable",
       default = NA_character_
     )]
     
-    # CORRECCIÓN: margen_lateral limita el desplazamiento en CUALQUIER dirección.
-    # desv_izq y desv_der pueden ser negativos (query fuera del borde de la ref)
-    # por lo que hay que aplicar abs() — sin él, valores negativos siempre pasan
-    # el filtro `<= margen` aunque el desplazamiento sea enorme.
+    # FIX: margen_lateral limits displacement in ANY direction.
+    # desv_izq and desv_der can be negative (query outside the ref boundary)
+    # so abs() must be applied — without it, negative values always pass
+    # the `<= margin` filter even when displacement is enormous.
     dt_valid <- dt_overlap[
       !is.na(Confianza_Region) &
         (query_type == ref_type | ref_type == "DEL/DUP") &
@@ -656,29 +663,29 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     dt_valid[, pct_strict := strict_len / query_length]
     dt_valid[, Tipo_Rango := fifelse(
       pct_strict >= CONFIG$umbral_strict,
-      "Estricto",
-      "Amplio"
+      "Strict",
+      "Wide"
     )]
     
-    # Seleccionar el mejor match por query: Fuerte primero, desempate por mayor sim_maxlen,
-    # luego Jaccard, y finalmente ref_name (alfabético) para garantizar determinismo entre batches
-    nivel_ord_region <- c(Fuerte = 1L, Probable = 2L)
+    # Select the best match per query: Strong first, tiebreak by highest sim_maxlen,
+    # then Jaccard, and finally ref_name (alphabetical) to guarantee determinism across batches
+    nivel_ord_region <- c(Strong = 1L, Probable = 2L)
     dt_valid[, nivel_num := nivel_ord_region[Confianza_Region]]
     dt_best <- dt_valid[order(query_id, nivel_num, -sim_maxlen, -jaccard, ref_name), .SD[1], by = query_id]
     
-    # CORRECCIÓN CRÍTICA: dt_best$query_id contiene valores de idx_original (índices
-    # de dt_annotsv), NO posiciones de fila en dt_fase1. Usar indexación directa
-    # dt_fase1[dt_best$query_id] tomaría posiciones incorrectas cuando dt_fase1 es
-    # un subconjunto filtrado de dt_annotsv. Se debe hacer un join por idx_original.
+    # CRITICAL FIX: dt_best$query_id contains values of idx_original (indices
+    # of dt_annotsv), NOT row positions in dt_fase1. Using direct indexing
+    # dt_fase1[dt_best$query_id] would take incorrect positions when dt_fase1 is
+    # a filtered subset of dt_annotsv. A join by idx_original must be used.
     pos_en_fase1 <- match(dt_best$query_id, dt_fase1$idx_original)
     dt_fase2_region <- dt_fase1[pos_en_fase1]
     dt_fase2_region[, `:=`(
       Referencia_Match  = dt_best$ref_name,
-      Overlap_Width     = dt_best$overlap_width,                          # pb solapados
-      Prop_Referencia   = round(dt_best$prop_referencia * 100, 1),        # % del rango de referencia cubierto
+      Overlap_Width     = dt_best$overlap_width,                          # overlapping bp
+      Prop_Referencia   = round(dt_best$prop_referencia * 100, 1),        # % of reference range covered
       Sim_MaxLen        = round(dt_best$sim_maxlen, 4),                   # overlap / max(len_q, len_r)
-      Jaccard           = round(dt_best$jaccard, 4),                      # índice de Jaccard
-      Confianza_Region  = dt_best$Confianza_Region,                       # Fuerte / Probable
+      Jaccard           = round(dt_best$jaccard, 4),                      # Jaccard index
+      Confianza_Region  = dt_best$Confianza_Region,                       # Strong / Probable
       Tipo_Rango        = dt_best$Tipo_Rango
     )]
     ids_en_region <- dt_best$query_id
@@ -699,18 +706,18 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
       Sim_MaxLen       = NA_real_,
       Jaccard          = NA_real_,
       Confianza_Region = NA_character_,
-      Tipo_Rango       = "Fuera"
+      Tipo_Rango       = "Outside"
     )]
   }
   
   dt_fase2 <- rbindlist(list(dt_fase2_region, dt_fase2_fuera), fill = TRUE)
   
   if(nrow(dt_fase2) == 0) {
-    cat("      (Sin variantes tras filtro de regiones + SFARI)\n")
+    cat("      (No variants after region + SFARI filter)\n")
     return(NULL)
   }
   
-  # --- ANÁLISIS DE HERENCIA ---
+  # --- INHERITANCE ANALYSIS ---
   dt_fase2[, Tipo_Herencia      := NA_character_]
   dt_fase2[, IDs_Coincidencia_PA := NA_character_]
   dt_fase2[, IDs_Coincidencia_MA := NA_character_]
@@ -719,15 +726,15 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     if(nrow(dt) == 0 || !"SV_chrom" %in% colnames(dt)) return(data.table())
     id_col <- if("AnnotSV_ID" %in% colnames(dt)) as.character(dt$AnnotSV_ID) else as.character(seq_len(nrow(dt)))
     
-    # Clasificar tipo: cubre tanto SVs (DEL/DUP) como CNVs (loss/gain)
+    # Classify type: covers both SVs (DEL/DUP) and CNVs (loss/gain)
     sv_type_up <- toupper(as.character(dt$SV_type))
     tipo_vec <- fcase(
       grepl("DEL|LOSS", sv_type_up), "DEL",
       grepl("DUP|GAIN", sv_type_up), "DUP",
-      default = "OTRO"
+      default = "OTHER"
     )
     
-    # Extraer genotipo del progenitor desde su columna de muestra (GT:FT:... → GT)
+    # Extract parent genotype from its sample column (GT:FT:... → GT)
     gt_vec <- rep(NA_character_, nrow(dt))
     if("Samples_ID" %in% colnames(dt)) {
       sids <- as.character(dt$Samples_ID)
@@ -740,16 +747,16 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
           n_encontradas <- n_encontradas + length(rows)
         }
       }
-      # CORRECCIÓN: advertir si ningún Samples_ID coincide con una columna de muestra.
-      # En ese caso gt_vec queda todo NA, los genotipos en el output serán "?" y la
-      # herencia podría clasificarse con información incompleta.
+      # FIX: warn if no Samples_ID matches a sample column.
+      # In that case gt_vec will be all NA, genotypes in the output will be "?" and
+      # inheritance could be classified with incomplete information.
       if(n_encontradas == 0L) {
-        cat("      ⚠ [norm_prog] Ningún Samples_ID del progenitor coincide con una columna de muestra.",
-            "Genotipos no disponibles para este progenitor.\n")
+        cat("      \u26a0 [norm_prog] No parent Samples_ID matches a sample column.",
+            "Genotypes not available for this parent.\n")
       }
     }
     
-    # Extraer nombres de gen normalizados (pueden ser múltiples, separados por coma/punto y coma)
+    # Extract normalised gene names (can be multiple, separated by comma/semicolon)
     gene_raw <- if ("Gene_name" %in% colnames(dt)) {
       toupper(trimws(as.character(dt$Gene_name)))
     } else {
@@ -764,21 +771,21 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
       end      = as.numeric(dt$SV_end),
       type     = tipo_vec,
       genotype = gt_vec,
-      gene     = gene_raw   # genes del progenitor para match por gen+longitud
+      gene     = gene_raw   # parent genes for gene+length matching
     )
-    # Eliminar filas con coordenadas inválidas o tipo desconocido
-    # (tipo "OTRO" generaría falsos matches si dos variantes desconocidas solapan)
-    dt_norm <- dt_norm[!is.na(start) & !is.na(end) & type != "OTRO"]
+    # Remove rows with invalid coordinates or unknown type
+    # (type "OTHER" would generate false matches if two unknown variants overlap)
+    dt_norm <- dt_norm[!is.na(start) & !is.na(end) & type != "OTHER"]
     setkey(dt_norm, chr, start, end)
     return(dt_norm)
   }
   
   calc_herencia <- function(hijo, prog) {
-    # Herencia basada exclusivamente en coordenadas genómicas (chr, start, end) y tipo de SV.
-    # Métrica principal: sim = overlap / max(len_hijo, len_prog)
-    #   equivalente a 1 - d, donde d = 1 - (width(pintersect) / pmax(width_q, width_r))
-    # Dos niveles de confianza:
-    #   Fuerte:   sim >= umbral_herencia
+    # Inheritance based exclusively on genomic coordinates (chr, start, end) and SV type.
+    # Main metric: sim = overlap / max(len_proband, len_parent)
+    #   equivalent to 1 - d, where d = 1 - (width(pintersect) / pmax(width_q, width_r))
+    # Two confidence levels:
+    #   Strong:   sim >= umbral_herencia
     #   Probable: sim >= umbral_herencia_lax  AND  Jaccard >= umbral_jaccard
     n <- nrow(hijo)
     resultado <- list(
@@ -811,25 +818,25 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     h_idx <- queryHits(hits)
     p_idx <- subjectHits(hits)
     
-    # Conservar solo hits con mismo tipo de SV y excluir tipo "OTRO"
+    # Keep only hits with same SV type and exclude type "OTHER"
     tipo_ok <- gr_hijo$type[h_idx] == gr_prog$type[p_idx] &
-      gr_hijo$type[h_idx] != "OTRO"
+      gr_hijo$type[h_idx] != "OTHER"
     if(!any(tipo_ok)) return(resultado)
     h_idx <- h_idx[tipo_ok]
     p_idx <- p_idx[tipo_ok]
     
-    # --- Lógica de overlap: d = 1 - (width(pintersect) / pmax(width_hijo, width_prog)) ---
-    # Vectorizado sobre los pares de hits filtrados
+    # --- Overlap logic: d = 1 - (width(pintersect) / pmax(width_proband, width_parent)) ---
+    # Vectorised over filtered hit pairs
     h_start <- start(gr_hijo)[h_idx];  h_end <- end(gr_hijo)[h_idx]
     p_start <- start(gr_prog)[p_idx];  p_end <- end(gr_prog)[p_idx]
     h_len   <- gr_hijo$len[h_idx]
     p_len   <- gr_prog$len[p_idx]
     
-    # pintersect vectorizado: ancho de la intersección de cada par
+    # Vectorised pintersect: width of intersection for each pair
     ovl_width <- pmax(0L, pmin(h_end, p_end) - pmax(h_start, p_start) + 1L)
-    max_len   <- pmax(h_len, p_len)                        # pmax(width_hijo, width_prog)
+    max_len   <- pmax(h_len, p_len)                        # pmax(width_proband, width_parent)
     sim_maxlen <- ovl_width / max_len                      # sim = 1 - d
-    # Jaccard complementario
+    # Complementary Jaccard
     union_len  <- h_len + p_len - ovl_width
     jaccard    <- ovl_width / union_len
     
@@ -841,9 +848,9 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
       jaccard    = jaccard
     )
     
-    # Asignar nivel de confianza
+    # Assign confidence level
     ov[, confianza := fcase(
-      sim_maxlen >= CONFIG$umbral_herencia,                                          "Fuerte",
+      sim_maxlen >= CONFIG$umbral_herencia,                                          "Strong",
       sim_maxlen >= CONFIG$umbral_herencia_lax & jaccard >= CONFIG$umbral_jaccard,   "Probable",
       default = NA_character_
     )]
@@ -851,9 +858,9 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     ov_ok <- ov[!is.na(confianza)]
     if(nrow(ov_ok) == 0) return(resultado)
     
-    # Por cada hijo: elegir el match de mayor confianza; desempate por mayor sim_maxlen
-    # y luego por annot_id (alfabético) para garantizar determinismo entre batches
-    nivel_ord <- c(Fuerte = 1L, Probable = 2L)
+    # For each proband: choose the highest-confidence match; tiebreak by highest sim_maxlen
+    # and then annot_id (alphabetical) to guarantee determinism across batches
+    nivel_ord <- c(Strong = 1L, Probable = 2L)
     ov_ok[, nivel_num := nivel_ord[confianza]]
     match_por_hijo <- ov_ok[order(row_idx, nivel_num, -sim_maxlen, -jaccard, annot_id), .SD[1], by = row_idx]
     match_por_hijo <- match_por_hijo[, .(
@@ -870,48 +877,48 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     resultado$ids_match[validos] <- match_por_hijo$ids_match[pos[validos]]
     resultado$genotype[validos]  <- match_por_hijo$genotype[pos[validos]]
     
-    # --- Paso 2: Match por gen + longitud similar (sin solapamiento requerido) ---
-    # Se aplica SOLO a filas que no han sido emparejadas en el paso 1 (overlap).
-    # Condiciones: mismo cromosoma, mismo tipo de SV, al menos un gen en común,
-    # y ratio de longitudes min/max >= umbral_longitud_similar.
-    # Todas las coincidencias encontradas aquí se clasifican como "Probable",
-    # ya que la ausencia de solapamiento espacial implica menor certeza biológica.
+    # --- Step 2: Match by gene + similar length (no overlap required) ---
+    # Applied ONLY to rows that were not matched in step 1 (overlap).
+    # Conditions: same chromosome, same SV type, at least one gene in common,
+    # and length ratio min/max >= umbral_longitud_similar.
+    # All matches found here are classified as "Probable",
+    # since the absence of spatial overlap implies lower biological certainty.
     filas_sin_match <- which(!resultado$heredado)
     
     if (length(filas_sin_match) > 0 &&
         "gene" %in% names(hijo) && "gene" %in% names(prog) && nrow(prog) > 0) {
       
-      # Precalcular longitudes del progenitor una sola vez
+      # Pre-compute parent lengths once
       prog_len <- prog$end - prog$start + 1L
       
       for (fi in filas_sin_match) {
         h_chr  <- hijo$chr[fi]
         h_type <- hijo$type[fi]
-        if (is.na(h_type) || h_type == "OTRO") next
+        if (is.na(h_type) || h_type == "OTHER") next
         
         h_len      <- hijo$end[fi] - hijo$start[fi] + 1L
         h_gene_str <- hijo$gene[fi]
         if (is.na(h_gene_str) || h_gene_str == "") next
         
-        # Parsear genes del hijo (separadores: coma, punto y coma, espacio)
+        # Parse proband genes (separators: comma, semicolon, space)
         h_genes <- toupper(trimws(unlist(strsplit(h_gene_str, "[,;[:space:]]+"))))
         h_genes <- h_genes[nzchar(h_genes) & h_genes != "."]
         if (length(h_genes) == 0) next
         
-        # Filtrar candidatos del progenitor: mismo chr y mismo tipo
+        # Filter parent candidates: same chr and same type
         mask_base <- prog$chr == h_chr & prog$type == h_type
         if (!any(mask_base)) next
         cands     <- prog[mask_base, ]
         c_len     <- prog_len[mask_base]
         
-        # Filtrar por ratio de longitud
+        # Filter by length ratio
         ratio_len <- pmin(h_len, c_len) / pmax(h_len, c_len)
         mask_long <- ratio_len >= CONFIG$umbral_longitud_similar
         if (!any(mask_long)) next
         cands     <- cands[mask_long, ]
         ratio_ok  <- ratio_len[mask_long]
         
-        # Filtrar por gen compartido
+        # Filter by shared gene
         p_genes_list <- strsplit(toupper(trimws(cands$gene)), "[,;[:space:]]+")
         gene_match <- vapply(p_genes_list, function(pg) {
           pg <- pg[nzchar(pg) & pg != "."]
@@ -922,18 +929,18 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
         cands    <- cands[gene_match, ]
         ratio_ok <- ratio_ok[gene_match]
         
-        # Elegir el mejor candidato: mayor ratio de longitud; desempate por annot_id
+        # Choose the best candidate: highest length ratio; tiebreak by annot_id
         best_idx <- order(-ratio_ok, cands$annot_id)[1L]
         
         resultado$heredado[fi]  <- TRUE
-        resultado$confianza[fi] <- "Probable"   # siempre Probable: no hay solapamiento directo
+        resultado$confianza[fi] <- "Probable"   # always Probable: no direct overlap
         resultado$ids_match[fi] <- cands$annot_id[best_idx]
         resultado$genotype[fi]  <- cands$genotype[best_idx]
         
-        cat(paste0("      [Herencia gen+lon] Fila ", fi,
-                   " | gen(es)=", paste(h_genes, collapse = ","),
+        cat(paste0("      [Gene+len inheritance] Row ", fi,
+                   " | gene(s)=", paste(h_genes, collapse = ","),
                    " | ratio_len=", round(ratio_ok[best_idx], 3),
-                   " → match ", cands$annot_id[best_idx], "\n"))
+                   " \u2192 match ", cands$annot_id[best_idx], "\n"))
       }
     }
     
@@ -957,7 +964,7 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
         type  = fcase(
           grepl("DEL|LOSS", toupper(SV_type)), "DEL",
           grepl("DUP|GAIN", toupper(SV_type)), "DUP",
-          default = "OTRO"
+          default = "OTHER"
         ),
         gene  = {
           g <- toupper(trimws(as.character(Gene_name)))
@@ -965,8 +972,8 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
           g
         }
       )]
-      # No se usa setkey aquí: los joins se hacen vía GRanges (no por clave data.table)
-      # y reordenar podría desincronizar row_idx con filas_her_idx en depuraciones futuras
+      # setkey is not used here: joins are done via GRanges (not by data.table key)
+      # and reordering could desync row_idx from filas_her_idx in future debugging
       
       res_pa <- calc_herencia(dt_hijo, dt_pa_n)
       res_ma <- calc_herencia(dt_hijo, dt_ma_n)
@@ -980,41 +987,41 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
       gt_pa   <- res_pa$genotype
       gt_ma   <- res_ma$genotype
       
-      # TRUE si el archivo del progenitor tiene datos reales (no vacio)
+      # TRUE if the parent file has real data (not empty)
       tiene_padre <- nrow(dt_padre_filtrado) > 0
       tiene_madre <- nrow(dt_madre_filtrado) > 0
       
-      # Etiqueta: origen + confianza (si Probable) + genotipo del progenitor entre corchetes
+      # Label: origin + confidence (if Probable) + parent genotype in brackets
       fmt_gt  <- function(gt) ifelse(!is.na(gt) & nzchar(gt), paste0(" [", gt, "]"), "")
       fmt_duo <- function(gp, gm) paste0(
         " [", ifelse(!is.na(gp) & nzchar(gp), gp, "?"),
         " | ", ifelse(!is.na(gm) & nzchar(gm), gm, "?"), "]"
       )
       
-      # Si ninguno de los dos progenitores tiene la variante, la clasificacion final
-      # depende de si ambos estaban disponibles:
-      #   - Ambos disponibles y ausentes -> De novo (confirmado)
-      #   - Alguno falta               -> Desconocida (no se puede confirmar)
-      etiqueta_sin_herencia <- ifelse(tiene_padre & tiene_madre, "De novo", "Desconocida")
+      # If neither parent carries the variant, the final classification
+      # depends on whether both were available:
+      #   - Both available and absent -> De novo (confirmed)
+      #   - One missing              -> Unknown (cannot be confirmed)
+      etiqueta_sin_herencia <- ifelse(tiene_padre & tiene_madre, "De novo", "Unknown")
       
       tipo_her <- ifelse(
-        her_pa & her_ma & !is.na(conf_pa) & conf_pa == "Fuerte" & !is.na(conf_ma) & conf_ma == "Fuerte",
-        paste0("Conjunta", fmt_duo(gt_pa, gt_ma)),
+        her_pa & her_ma & !is.na(conf_pa) & conf_pa == "Strong" & !is.na(conf_ma) & conf_ma == "Strong",
+        paste0("Combined", fmt_duo(gt_pa, gt_ma)),
         ifelse(
           her_pa & her_ma,
-          paste0("Conjunta (Probable)", fmt_duo(gt_pa, gt_ma)),
+          paste0("Combined (Probable)", fmt_duo(gt_pa, gt_ma)),
           ifelse(
-            her_pa & !is.na(conf_pa) & conf_pa == "Fuerte",
-            paste0("Paterna", fmt_gt(gt_pa)),
+            her_pa & !is.na(conf_pa) & conf_pa == "Strong",
+            paste0("Paternal", fmt_gt(gt_pa)),
             ifelse(
               her_pa,
-              paste0("Paterna (Probable)", fmt_gt(gt_pa)),
+              paste0("Paternal (Probable)", fmt_gt(gt_pa)),
               ifelse(
-                her_ma & !is.na(conf_ma) & conf_ma == "Fuerte",
-                paste0("Materna", fmt_gt(gt_ma)),
+                her_ma & !is.na(conf_ma) & conf_ma == "Strong",
+                paste0("Maternal", fmt_gt(gt_ma)),
                 ifelse(
                   her_ma,
-                  paste0("Materna (Probable)", fmt_gt(gt_ma)),
+                  paste0("Maternal (Probable)", fmt_gt(gt_ma)),
                   etiqueta_sin_herencia
                 )
               )
@@ -1027,10 +1034,10 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
       dt_fase2[filas_her_idx, IDs_Coincidencia_PA := ids_pa]
       dt_fase2[filas_her_idx, IDs_Coincidencia_MA := ids_ma]
       
-      # Propagar de filas full → split por AnnotSV_ID de forma segura
+      # Propagate from full → split rows by AnnotSV_ID safely
       if(tiene_modo && "AnnotSV_ID" %in% colnames(dt_fase2)) {
         dt_her_map <- dt_fase2[Annotation_mode == "full", .(AnnotSV_ID, Tipo_Herencia, IDs_Coincidencia_PA, IDs_Coincidencia_MA)]
-        dt_her_map <- unique(dt_her_map, by = "AnnotSV_ID") 
+        dt_her_map <- unique(dt_her_map, by = "AnnotSV_ID")
         
         dt_fase2[Annotation_mode == "split", c("Tipo_Herencia", "IDs_Coincidencia_PA", "IDs_Coincidencia_MA") := {
           idx <- match(AnnotSV_ID, dt_her_map$AnnotSV_ID)
@@ -1043,13 +1050,13 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
       }
     }
   } else {
-    cat("      ⚠ Sin archivos de progenitores disponibles; herencia no calculada\n")
+    cat("      \u26a0 No parent files available; inheritance not calculated\n")
   }
   
-  # --- GENOTIPO DEL HIJO (probando) ---
-  # Extraer GT del hijo igual que se hace con los progenitores: usando Samples_ID
-  # como nombre de la columna de muestra y tomando el campo antes del primer ":".
-  # Se aplica solo a filas "full"; las "split" lo heredan por AnnotSV_ID.
+  # --- PROBAND GENOTYPE ---
+  # Extract proband GT in the same way as for parents: using Samples_ID
+  # as the sample column name and taking the field before the first ":".
+  # Applied only to "full" rows; "split" rows inherit it by AnnotSV_ID.
   if ("Samples_ID" %in% colnames(dt_fase2)) {
     gt_hijo_vec <- rep(NA_character_, nrow(dt_fase2))
     sids_hijo   <- as.character(dt_fase2$Samples_ID)
@@ -1062,7 +1069,7 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     }
     dt_fase2[, Genotipo_Hijo := gt_hijo_vec]
     
-    # Propagar de full -> split por AnnotSV_ID (igual que Tipo_Herencia)
+    # Propagate from full -> split by AnnotSV_ID (same as Tipo_Herencia)
     if ("Annotation_mode" %in% colnames(dt_fase2) && "AnnotSV_ID" %in% colnames(dt_fase2)) {
       map_gt <- dt_fase2[Annotation_mode == "full", .(AnnotSV_ID, Genotipo_Hijo)]
       map_gt <- unique(map_gt, by = "AnnotSV_ID")
@@ -1075,7 +1082,7 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     dt_fase2[, Genotipo_Hijo := NA_character_]
   }
   
-  # --- ORDENAMIENTO ---
+  # --- SORTING ---
   if("Annotation_mode" %in% colnames(dt_fase2)) {
     dt_fase2[, is_full := fifelse(Annotation_mode == "full", 0L, 1L)]
   } else {
@@ -1085,31 +1092,31 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
   dt_final <- dt_fase2[order(AnnotSV_ID, is_full, -ranking_numeric)]
   dt_final[, is_full := NULL]
   
-  # --- DEDUPLICACIÓN DE REGIONES SIMILARES ---
-  # Colapsa variantes que solapan con sim >= umbral_herencia en el mismo chr y tipo.
-  # Si alguna tiene herencia distinta de "De novo", se conserva esa; si todas son
-  # "De novo", se queda la de mayor ranking_numeric.
-  # Activar/desactivar con CONFIG$deduplicar_regiones.
+  # --- DEDUPLICATION OF SIMILAR REGIONS ---
+  # Collapses variants overlapping with sim >= umbral_herencia on the same chr and type.
+  # If any has inheritance other than "De novo", that one is kept; if all are
+  # "De novo", the one with the highest ranking_numeric is kept.
+  # Enable/disable with CONFIG$deduplicar_regiones.
   if(isTRUE(CONFIG$deduplicar_regiones)) {
     n_antes_dedup <- nrow(dt_final)
     dt_final <- deduplicar_regiones_similares(dt_final)
     n_despues_dedup <- nrow(dt_final)
     if(n_antes_dedup != n_despues_dedup) {
-      cat(paste0("      [Dedup] Total: ", n_antes_dedup, " → ", n_despues_dedup, " variantes\n"))
+      cat(paste0("      [Dedup] Total: ", n_antes_dedup, " \u2192 ", n_despues_dedup, " variants\n"))
     }
   } else {
-    cat("      [Dedup] Colapso desactivado (CONFIG$deduplicar_regiones = FALSE)\n")
+    cat("      [Dedup] Collapsing disabled (CONFIG$deduplicar_regiones = FALSE)\n")
   }
   
-  # --- RESTAURAR COLUMNAS ORIGINALES CON VALORES REALES ---
-  # Para cada columna del TSV original ausente en dt_final, recuperar los valores
-  # reales desde el snapshot dt_annotsv_src usando .src_row_ como clave de fila.
-  # Esto garantiza que no solo aparezca el nombre sino el valor correcto.
+  # --- RESTORE ORIGINAL COLUMNS WITH REAL VALUES ---
+  # For each column from the original TSV absent in dt_final, recover the real
+  # values from the snapshot dt_annotsv_src using .src_row_ as the row key.
+  # This guarantees not only that the column name appears but that the correct value is present.
   cols_aux_internas <- c("ranking_numeric", "idx_original", "is_full", ".src_row_")
   cols_esperadas    <- setdiff(cols_originales, cols_aux_internas)
   cols_perdidas     <- setdiff(cols_esperadas, names(dt_final))
   if (length(cols_perdidas) > 0) {
-    cat(paste0("      ⚠ Recuperando ", length(cols_perdidas), " columna(s) desde snapshot: ",
+    cat(paste0("      \u26a0 Recovering ", length(cols_perdidas), " column(s) from snapshot: ",
                paste(cols_perdidas, collapse = ", "), "\n"))
     pos <- match(dt_final$.src_row_, dt_annotsv_src$.src_row_)
     for (col in cols_perdidas) {
@@ -1119,7 +1126,7 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
   
   cols_inicio  <- c("Tipo_Herencia", "Genotipo_Hijo", "Tipo_Rango", "En_Panel_Genes", "AnnotSV_ranking_score")
   cols_fin     <- c("IDs_Coincidencia_PA", "IDs_Coincidencia_MA")
-  # Eliminar columnas auxiliares internas que no deben aparecer en el Excel
+  # Remove internal auxiliary columns that should not appear in the Excel output
   cols_aux     <- c("idx_original", "ranking_numeric", ".src_row_")
   for (col_aux in cols_aux) {
     if (col_aux %in% names(dt_final)) dt_final[, (col_aux) := NULL]
@@ -1130,12 +1137,12 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
   
   setcolorder(dt_final, c(cols_inicio_ex, cols_medio, cols_fin_ex))
   
-  cat(paste0("      ✓ ", nrow(dt_final), " variantes finales\n"))
+  cat(paste0("      \u2713 ", nrow(dt_final), " final variants\n"))
   return(dt_final)
 }
 
 # =============================================================================
-# 5. FUNCIÓN OPTIMIZADA PARA GUARDAR EXCEL
+# 5. OPTIMISED FUNCTION TO SAVE EXCEL
 # =============================================================================
 sanitizar_df <- function(df) {
   for(j in seq_along(df)) {
@@ -1149,7 +1156,7 @@ sanitizar_df <- function(df) {
   for(j in seq_along(df)) {
     if(is.logical(df[[j]])) {
       df[[j]] <- ifelse(is.na(df[[j]]), NA_character_,
-                        ifelse(df[[j]], "Sí", "No"))
+                        ifelse(df[[j]], "Yes", "No"))
     }
   }
   for(j in seq_along(df)) {
@@ -1167,10 +1174,10 @@ sanitizar_df <- function(df) {
   }
   names(df) <- iconv(names(df), from = "", to = "UTF-8", sub = "")
   names(df) <- gsub("[\\[\\]\\*\\?:/\\\\]", "_", names(df), perl = TRUE)
-  # Resolver colisiones de nombres: columnas de AnnotSV como FORMAT[GT], FORMAT[FT], etc.
-  # quedan con nombres tipo FORMAT_GT_ tras el gsub. Si dos columnas distintas producen
-  # el mismo nombre, writeData() descarta silenciosamente las duplicadas.
-  # Se añade sufijo _2, _3... para garantizar unicidad.
+  # Resolve name collisions: AnnotSV columns such as FORMAT[GT], FORMAT[FT], etc.
+  # become names like FORMAT_GT_ after gsub. If two different columns produce
+  # the same name, writeData() silently discards duplicates.
+  # Suffix _2, _3... is added to guarantee uniqueness.
   nms <- names(df)
   for (nm in unique(nms[duplicated(nms)])) {
     idx <- which(nms == nm)
@@ -1196,7 +1203,7 @@ guardar_excel_estilizado <- function(lista_resultados, ruta_salida) {
   
   for(nombre_hoja in names(lista_resultados)) {
     df <- sanitizar_df(as.data.frame(lista_resultados[[nombre_hoja]]))
-    cat(paste0("      [Excel] Hoja '", nombre_hoja, "': ", ncol(df), " columnas, ", nrow(df), " filas\n"))
+    cat(paste0("      [Excel] Sheet '", nombre_hoja, "': ", ncol(df), " columns, ", nrow(df), " rows\n"))
     addWorksheet(wb, nombre_hoja)
     writeData(wb, nombre_hoja, df)
     
@@ -1206,10 +1213,10 @@ guardar_excel_estilizado <- function(lista_resultados, ruta_salida) {
     col_sco <- which(names(df) == "AnnotSV_ranking_score")
     
     if(length(col_her) > 0) {
-      rows_denovo   <- which(!is.na(df$Tipo_Herencia) & df$Tipo_Herencia %in% c("De novo", "Desconocida"))
-      rows_paterna  <- which(!is.na(df$Tipo_Herencia) & grepl("^Paterna",  df$Tipo_Herencia))
-      rows_materna  <- which(!is.na(df$Tipo_Herencia) & grepl("^Materna",  df$Tipo_Herencia))
-      rows_conjunta <- which(!is.na(df$Tipo_Herencia) & grepl("^Conjunta", df$Tipo_Herencia))
+      rows_denovo   <- which(!is.na(df$Tipo_Herencia) & df$Tipo_Herencia %in% c("De novo", "Unknown"))
+      rows_paterna  <- which(!is.na(df$Tipo_Herencia) & grepl("^Paternal",  df$Tipo_Herencia))
+      rows_materna  <- which(!is.na(df$Tipo_Herencia) & grepl("^Maternal",  df$Tipo_Herencia))
+      rows_conjunta <- which(!is.na(df$Tipo_Herencia) & grepl("^Combined",  df$Tipo_Herencia))
       
       if(length(rows_denovo) > 0)   addStyle(wb, nombre_hoja, st_denovo,  rows = rows_denovo + 1,   cols = col_her)
       if(length(rows_paterna) > 0)  addStyle(wb, nombre_hoja, st_paterna, rows = rows_paterna + 1,  cols = col_her)
@@ -1218,9 +1225,9 @@ guardar_excel_estilizado <- function(lista_resultados, ruta_salida) {
     }
     
     if(length(col_ran) > 0) {
-      rows_estricto <- which(!is.na(df$Tipo_Rango) & df$Tipo_Rango == "Estricto")
-      rows_amplio   <- which(!is.na(df$Tipo_Rango) & df$Tipo_Rango == "Amplio")
-      rows_fuera    <- which(!is.na(df$Tipo_Rango) & df$Tipo_Rango == "Fuera")
+      rows_estricto <- which(!is.na(df$Tipo_Rango) & df$Tipo_Rango == "Strict")
+      rows_amplio   <- which(!is.na(df$Tipo_Rango) & df$Tipo_Rango == "Wide")
+      rows_fuera    <- which(!is.na(df$Tipo_Rango) & df$Tipo_Rango == "Outside")
       
       if(length(rows_estricto) > 0) addStyle(wb, nombre_hoja, st_estric, rows = rows_estricto + 1, cols = col_ran)
       if(length(rows_amplio) > 0)   addStyle(wb, nombre_hoja, st_amplio, rows = rows_amplio + 1,   cols = col_ran)
@@ -1228,7 +1235,7 @@ guardar_excel_estilizado <- function(lista_resultados, ruta_salida) {
     }
     
     if(length(col_sfa) > 0) {
-      rows_sfari_yes <- which(!is.na(df[[col_sfa]]) & df[[col_sfa]] == "Sí")
+      rows_sfari_yes <- which(!is.na(df[[col_sfa]]) & df[[col_sfa]] == "Yes")
       rows_sfari_no  <- which(!is.na(df[[col_sfa]]) & df[[col_sfa]] == "No")
       
       if(length(rows_sfari_yes) > 0) addStyle(wb, nombre_hoja, st_green, rows = rows_sfari_yes + 1, cols = col_sfa)
@@ -1236,7 +1243,7 @@ guardar_excel_estilizado <- function(lista_resultados, ruta_salida) {
     }
     
     if(length(col_sco) > 0) {
-      # AnnotSV_ranking_score: negativos = benignos (verde), 0–0.5 = intermedio (naranja), ≥0.5 = patogénico (rojo)
+      # AnnotSV_ranking_score: negative = benign (green), 0–0.5 = intermediate (orange), >=0.5 = pathogenic (red)
       score_vals <- suppressWarnings(as.numeric(df$AnnotSV_ranking_score))
       rows_verde   <- which(!is.na(score_vals) & score_vals < 0)
       rows_naranja <- which(!is.na(score_vals) & score_vals >= 0   & score_vals < 0.5)
@@ -1254,19 +1261,19 @@ guardar_excel_estilizado <- function(lista_resultados, ruta_salida) {
 }
 
 # =============================================================================
-# 6. BUCLE PRINCIPAL (BATCH PROCESSING)
+# 6. MAIN LOOP (BATCH PROCESSING)
 # =============================================================================
 cat("\n=============================================================================\n")
-cat("INICIANDO PROCESAMIENTO EN LOTES\n")
+cat("STARTING BATCH PROCESSING\n")
 cat("=============================================================================\n")
 
 sel <- function(tsv, patron) tsv[grepl(patron, basename(tsv), ignore.case = TRUE)][1]
 
 EXCEPCIONES_PROGENITORES <- list(
-  # Formato: id_familia = list(PA = id_progenitor_pa, MA = id_progenitor_ma)
-  # El código buscará un directorio cuyo nombre termine en paste0(id_progenitor, sufijo)
-  # p.ej. para PA = "G04PMP068" buscará un directorio que acabe en "G04PMP068PA".
-  # ⚠ Asegurarse de que el directorio del progenitor exista con ese sufijo exacto.
+  # Format: family_id = list(PA = pa_parent_id, MA = ma_parent_id)
+  # The code will look for a directory whose name ends in paste0(parent_id, suffix)
+  # e.g. for PA = "G04PMP068" it will look for a directory ending in "G04PMP068PA".
+  # ⚠ Make sure the parent directory exists with that exact suffix.
   "G04PMP069" = list(PA = "G04PMP068", MA = "G04PMP068")
 )
 
@@ -1276,9 +1283,8 @@ buscar_dir_progenitor <- function(id_familia, sufijo, directorios_sub) {
     if(!is.null(id_prog)) {
       excepcion <- directorios_sub[grepl(paste0(id_prog, sufijo, "$"), basename(directorios_sub), ignore.case = TRUE)][1]
       if(!is.na(excepcion)) {
-        cat(paste0("  ℹ Excepción de progenitor aplicada para ", id_familia, sufijo,
-                   ": ", basename(excepcion), "
-"))
+        cat(paste0("  \u2139 Parent exception applied for ", id_familia, sufijo,
+                   ": ", basename(excepcion), "\n"))
         return(excepcion)
       }
     }
@@ -1287,20 +1293,20 @@ buscar_dir_progenitor <- function(id_familia, sufijo, directorios_sub) {
   exacto <- directorios_sub[grepl(paste0(id_familia, sufijo, "$"), directorios_sub, ignore.case = TRUE)][1]
   if(!is.na(exacto)) return(exacto)
   
-  prefijo       <- sub("\\d+$", "", id_familia)       
-  num_hijo      <- sub("^.*?(\\d+)$", "\\1", id_familia)   
-  num_hijo_sin0 <- sub("^0+", "", num_hijo)           
+  prefijo       <- sub("\\d+$", "", id_familia)
+  num_hijo      <- sub("^.*?(\\d+)$", "\\1", id_familia)
+  num_hijo_sin0 <- sub("^0+", "", num_hijo)
   
   patron_compartido <- paste0(
-    "^", prefijo, 
-    "(\\d+-(", num_hijo, "|", num_hijo_sin0, ")|(", num_hijo, "|", num_hijo_sin0, ")-\\d+)", 
+    "^", prefijo,
+    "(\\d+-(", num_hijo, "|", num_hijo_sin0, ")|(", num_hijo, "|", num_hijo_sin0, ")-\\d+)",
     sufijo, "$"
   )
   
   compartido <- directorios_sub[grepl(patron_compartido, basename(directorios_sub), ignore.case = TRUE)][1]
   
   if(!is.na(compartido)) {
-    cat(paste0("  ℹ Progenitor compartido detectado para ", id_familia, sufijo, ": ", basename(compartido), "\n"))
+    cat(paste0("  \u2139 Shared parent detected for ", id_familia, sufijo, ": ", basename(compartido), "\n"))
     return(compartido)
   }
   return(NA)
@@ -1313,7 +1319,7 @@ procesar_familia <- function(id_familia, directorios_sub, ruta_salida_sub) {
   dir_ma <- buscar_dir_progenitor(id_familia, "MA", directorios_sub)
   
   if(is.na(dir_hi) || !dir.exists(dir_hi)) {
-    cat("  ⚠ Sin carpeta HI, omitiendo familia\n")
+    cat("  \u26a0 No HI folder, skipping family\n")
     return(FALSE)
   }
   
@@ -1356,27 +1362,27 @@ procesar_familia <- function(id_familia, directorios_sub, ruta_salida_sub) {
   
   if(length(resultados_familia) > 0) {
     if(!dir.exists(ruta_salida_sub)) dir.create(ruta_salida_sub, recursive = TRUE)
-    nombre_excel  <- paste0(id_familia, "_Analisis_Completo.xlsx")
+    nombre_excel  <- paste0(id_familia, "_Complete_Analysis.xlsx")
     ruta_completa <- file.path(ruta_salida_sub, nombre_excel)
     tryCatch({
       guardar_excel_estilizado(resultados_familia, ruta_completa)
-      cat(paste("  ✓ Excel creado:", file.path(basename(ruta_salida_sub), nombre_excel), "\n"))
+      cat(paste("  \u2713 Excel created:", file.path(basename(ruta_salida_sub), nombre_excel), "\n"))
       return(resultados_familia)
     }, error = function(e) {
-      cat(paste("  [ERROR guardando Excel]:", e$message, "\n"))
+      cat(paste("  [ERROR saving Excel]:", e$message, "\n"))
       return(FALSE)
     })
   } else {
-    cat("  ⚠ Sin resultados para esta familia\n")
+    cat("  \u26a0 No results for this family\n")
     return(FALSE)
   }
 }
 
 subcarpetas <- list.dirs(CONFIG$ruta_entrada, full.names = TRUE, recursive = FALSE)
 
-# Cache de rutas TSV: se define ANTES de construir tareas y de cualquier llamada
-# a procesar_familia, para evitar referencias a objetos no definidos en cualquier
-# orden de ejecución o entorno de worker paralelo.
+# TSV path cache: defined BEFORE building tasks and before any call
+# to procesar_familia, to avoid references to undefined objects in any
+# execution order or parallel worker environment.
 cache_tsv <- new.env(hash = TRUE, parent = emptyenv())
 get_tsv_cached <- function(dir) {
   if(is.na(dir) || !dir.exists(dir)) return(character(0))
@@ -1392,17 +1398,17 @@ tareas <- rbindlist(lapply(subcarpetas, function(subcarpeta) {
   if(length(directorios_sub) == 0) return(NULL)
   ids_dir <- basename(directorios_sub)
   
-  # CORRECCIÓN: derivar IDs de familia SOLO desde directorios HI.
-  # Antes se usaban todos los directorios (HI + PA + MA), lo que provocaba que
-  # familias sin carpeta HI (solo PA o MA) se registrasen igualmente como tareas.
-  # Ahora: una familia solo existe si tiene un directorio HI; los progenitores
-  # se localizan después mediante buscar_dir_progenitor, que ya maneja tanto
-  # progenitores únicos como compartidos (patrón nnn-mmm).
+  # FIX: derive family IDs ONLY from HI directories.
+  # Previously all directories (HI + PA + MA) were used, which caused
+  # families without an HI folder (only PA or MA) to be registered as tasks.
+  # Now: a family only exists if it has an HI directory; parents
+  # are located afterwards via buscar_dir_progenitor, which already handles both
+  # unique and shared parents (nnn-mmm pattern).
   hi_dirs     <- ids_dir[grepl("HI$", ids_dir, ignore.case = TRUE)]
   ids_familia <- unique(sub("HI$", "", hi_dirs, ignore.case = TRUE))
-  # Excluir: cadenas vacías (salvaguarda) y cualquier ID residual con patrón
-  # de progenitor compartido (dígitos-dígitos), aunque en la práctica no
-  # deberían aparecer porque los directorios compartidos terminan en PA/MA, no HI.
+  # Exclude: empty strings (safeguard) and any residual ID with a shared-parent
+  # pattern (digits-digits), although in practice these should not appear
+  # because shared directories end in PA/MA, not HI.
   ids_familia <- ids_familia[ids_familia != "" & !grepl("^[^-]+-\\d+(HI|PA|MA)?$", ids_familia, ignore.case = TRUE)]
   if(length(ids_familia) == 0) return(NULL)
   data.table(
@@ -1420,7 +1426,7 @@ procesar_tarea <- function(tarea) {
   directorios_sub <- list.dirs(subcarpeta, full.names = TRUE, recursive = FALSE)
   
   cat(paste0("  ---------------------------------------------------\n"))
-  cat(paste0("  [", tarea$nombre_sub, "] Familia: ", id_familia, "\n"))
+  cat(paste0("  [", tarea$nombre_sub, "] Family: ", id_familia, "\n"))
   
   exito <- procesar_familia(id_familia, directorios_sub, ruta_salida_sub)
   return(exito)
@@ -1435,20 +1441,20 @@ if(.Platform$OS.type == "windows" || CONFIG$n_cores == 1L) {
 
 n_subcarpetas <- length(unique(tareas$nombre_sub))
 n_familias    <- nrow(tareas)
-n_exitosas    <- sum(vapply(resultados, is.list, logical(1))) 
+n_exitosas    <- sum(vapply(resultados, is.list, logical(1)))
 
 cat("=============================================================================\n")
-cat("✓ PROCESAMIENTO FINALIZADO\n")
-cat(paste0("  Subcarpetas procesadas: ", n_subcarpetas, "\n"))
-cat(paste0("  Familias procesadas:    ", n_familias,    "\n"))
-cat(paste0("  Archivos generados:     ", n_exitosas,    "\n"))
+cat("\u2713 PROCESSING COMPLETE\n")
+cat(paste0("  Subfolders processed: ", n_subcarpetas, "\n"))
+cat(paste0("  Families processed:   ", n_familias,    "\n"))
+cat(paste0("  Files generated:      ", n_exitosas,    "\n"))
 cat("=============================================================================\n")
 
 # =============================================================================
-# 6. RECOPILACIÓN DE VARIANTES DE ALTO IMPACTO (Score >= 0.15)
+# 7. COLLECTION OF HIGH-IMPACT VARIANTS (Score >= 0.15)
 # =============================================================================
 cat("\n=============================================================================\n")
-cat("GENERANDO DOCUMENTO RECOPILATORIO (SCORE >= 0.15)\n")
+cat("GENERATING SUMMARY DOCUMENT (SCORE >= 0.15)\n")
 cat("=============================================================================\n")
 
 lista_cnvs <- list()
@@ -1467,8 +1473,8 @@ dt_todas_sv  <- rbindlist(lista_svs, fill = TRUE)
 filtrar_alto_impacto <- function(dt) {
   if (nrow(dt) == 0) return(dt)
   
-  # ranking_numeric es una columna auxiliar interna que se elimina antes del output;
-  # aquí se recalcula desde AnnotSV_ranking_score para no depender de ella.
+  # ranking_numeric is an internal auxiliary column removed before output;
+  # here it is recalculated from AnnotSV_ranking_score to avoid depending on it.
   score_num <- suppressWarnings(as.numeric(as.character(dt$AnnotSV_ranking_score)))
   
   if ("Annotation_mode" %in% colnames(dt)) {
@@ -1488,27 +1494,27 @@ filtrar_alto_impacto <- function(dt) {
 dt_alto_cnv <- filtrar_alto_impacto(dt_todas_cnv)
 dt_alto_sv  <- filtrar_alto_impacto(dt_todas_sv)
 
-ruta_recopilacion <- file.path(CONFIG$ruta_salida, "Recopilacion_Alto_Impacto")
+ruta_recopilacion <- file.path(CONFIG$ruta_salida, "High_Impact_Summary")
 
 if (nrow(dt_alto_cnv) > 0 || nrow(dt_alto_sv) > 0) {
   if(!dir.exists(ruta_recopilacion)) dir.create(ruta_recopilacion, recursive = TRUE)
   
   resultados_recopilados <- list()
-  if (nrow(dt_alto_cnv) > 0) resultados_recopilados[["CNVs_Prioridad"]] <- dt_alto_cnv
-  if (nrow(dt_alto_sv) > 0)  resultados_recopilados[["SVs_Prioridad"]] <- dt_alto_sv
+  if (nrow(dt_alto_cnv) > 0) resultados_recopilados[["CNVs_Priority"]] <- dt_alto_cnv
+  if (nrow(dt_alto_sv) > 0)  resultados_recopilados[["SVs_Priority"]]  <- dt_alto_sv
   
-  ruta_excel_recop <- file.path(ruta_recopilacion, "Variantes_Score_Mayor_0.15.xlsx")
+  ruta_excel_recop <- file.path(ruta_recopilacion, "Variants_Score_Above_0.15.xlsx")
   tryCatch({
     guardar_excel_estilizado(resultados_recopilados, ruta_excel_recop)
-    cat(paste("✓ Documento recopilatorio creado exitosamente en:\n  ", ruta_excel_recop, "\n"))
-    cat(paste("  - Filas de CNVs incluidas:", nrow(dt_alto_cnv), "\n"))
-    cat(paste("  - Filas de SVs incluidas: ", nrow(dt_alto_sv), "\n"))
+    cat(paste("\u2713 Summary document successfully created at:\n  ", ruta_excel_recop, "\n"))
+    cat(paste("  - CNV rows included:", nrow(dt_alto_cnv), "\n"))
+    cat(paste("  - SV rows included: ", nrow(dt_alto_sv), "\n"))
   }, error = function(e) {
-    cat(paste("❌ Error guardando documento recopilatorio:", e$message, "\n"))
+    cat(paste("\u274c Error saving summary document:", e$message, "\n"))
   })
 } else {
-  cat("⚠ No se encontraron variantes con AnnotSV_ranking_score >= 0.15 en toda la cohorte.\n")
+  cat("\u26a0 No variants with AnnotSV_ranking_score >= 0.15 found across the cohort.\n")
 }
 
-cat("=============================================================================\n")  
+cat("=============================================================================\n")
 cat("=============================================================================\n")
