@@ -25,18 +25,21 @@ library(bsicons)
 # ── Null-coalescing operator (must be defined BEFORE any use) ──────────
 `%||%` <- function(a, b) if (!is.null(a)) a else b
 
-# ── Path to the pipeline script (same directory as app.R) ─────────────────
-PIPELINE_SCRIPT <- tryCatch({
+# ── Resolve the app's own directory (works in RStudio, Rscript and shiny::runApp) ──
+APP_DIR <- tryCatch({
   doc_path <- rstudioapi::getActiveDocumentContext()$path
-  if (nzchar(doc_path))
-    file.path(dirname(doc_path), "FiltroB_STEA.R")
-  else
-    file.path(getwd(), "FiltroB_STEA.R")
-}, error = function(e) {
-  file.path(getwd(), "FiltroB_STEA.R")
-})
+  if (nzchar(doc_path)) dirname(doc_path) else getwd()
+}, error = function(e) getwd())
+# When launched via shiny::runApp("path/to/app") the working directory IS the app dir
+if (!file.exists(file.path(APP_DIR, "app.R"))) APP_DIR <- getwd()
+
+# ── Path to the pipeline script (same directory as app.R) ─────────────
+PIPELINE_SCRIPT <- file.path(APP_DIR, "FiltroB_STEA.R")
 if (!file.exists(PIPELINE_SCRIPT))
   PIPELINE_SCRIPT <- file.path(getwd(), "FiltroB_STEA.R")
+# ── Logs Load ──────────────────────────────
+APP_LOGS_DIR <- file.path(APP_DIR, "logs")
+if (!dir.exists(APP_LOGS_DIR)) dir.create(APP_LOGS_DIR, recursive = TRUE)
 
 # =============================================================================
 # DEFAULT CONFIGURATION VALUES
@@ -54,7 +57,16 @@ CONFIG_DEFAULTS <- list(
   deduplicar          = TRUE,
   n_cores             = max(1L, parallel::detectCores(logical = FALSE) - 1L)
 )
-
+# ── Load existing config ──────────────────────────────
+CONFIG_FILE <- file.path(APP_LOGS_DIR, ".config.rds")
+if (file.exists(CONFIG_FILE)) {
+  try({
+    saved_cfg <- readRDS(CONFIG_FILE)
+    for (k in names(saved_cfg)) {
+      CONFIG_DEFAULTS[[k]] <- saved_cfg[[k]]
+    }
+  }, silent = TRUE)
+}
 #=============================================================================
 # INHERITANCE / RANGE COLOR PALETTE
 # =============================================================================
@@ -108,14 +120,14 @@ cargar_todos_Results <- function(ruta_salida) {
   ruta_norm <- normalizePath(trimws(ruta_salida), winslash = "/", mustWork = FALSE)
   
   archivos <- list.files(ruta_norm,
-                         pattern    = "_Analisis_Completo\\.xlsx$",
+                         pattern    = "_Complete_Analysis\\.xlsx$",
                          recursive  = TRUE,
                          full.names = TRUE)
   
   if (length(archivos) == 0) {
-    g1 <- Sys.glob(file.path(ruta_norm, "*_Analisis_Completo.xlsx"))
-    g2 <- Sys.glob(file.path(ruta_norm, "*",  "*_Analisis_Completo.xlsx"))
-    g3 <- Sys.glob(file.path(ruta_norm, "*", "*", "*_Analisis_Completo.xlsx"))
+    g1 <- Sys.glob(file.path(ruta_norm, "*_Complete_Analysis.xlsx"))
+    g2 <- Sys.glob(file.path(ruta_norm, "*",  "*_Complete_Analysis.xlsx"))
+    g3 <- Sys.glob(file.path(ruta_norm, "*", "*", "*_Complete_Analysis.xlsx"))
     archivos <- unique(c(g1, g2, g3))
   }
   
@@ -154,7 +166,7 @@ her_base <- function(x) {
 }
 
 # Detecta si un vector de valores de En_Panel_Genes es TRUE/positivo,
-# cubriendo todas las variantes (booleano, "TRUE", "Yes", "Yes", "Yes", "Yes",
+# cubriendo All las variantes (booleano, "TRUE", "Yes", "Yes", "Yes", "Yes",
 # "1", "yes") de forma robusta e insensible a tildes y mayusculas.
 es_sfari_col <- function(x) {
   x_norm <- toupper(trimws(iconv(as.character(x), to = "ASCII//TRANSLIT")))
@@ -562,7 +574,7 @@ ui <- page_navbar(
   ),
   
   nav_panel(
-    title = tagList(bsicons::bs_icon("play-circle-fill"), " Execution"),
+    title = tagList(bsicons::bs_icon("play-circle-fill"), " Run"),
     value = "tab_run",
     layout_columns(
       col_widths = c(4, 8),
@@ -605,33 +617,33 @@ ui <- page_navbar(
     div(
       style = "display:flex; gap:8px; align-items:flex-start;",
       
-      # ── Caja filtros (redimensionable) ──────────────────────────────────────
+      # ── Caja Filters (redimensionable) ──────────────────────────────────────
       div(
         style = "resize:both; overflow:auto; min-width:160px; max-width:40vw; min-height:300px; max-height:90vh; width:220px; flex-shrink:0;",
         card(
           style = "height:100%; width:100%; min-height:0;",
-          card_header(class = "bg-info text-white", bsicons::bs_icon("funnel-fill"), " Filtros"),
+          card_header(class = "bg-info text-white", bsicons::bs_icon("funnel-fill"), " Filters"),
           card_body(
             style = "overflow-y:auto;",
             actionButton("btn_cargar_Results", "🔄 Load / Refresh", class = "btn-info btn-sm w-100"),
             hr(),
-            radioButtons("filtro_modalidad", "Modality", choices  = c("CNVs", "SVs", "Ambas"), selected = "Ambas", inline = TRUE),
+            radioButtons("filtro_modalidad", "Modality", choices  = c("CNVs", "SVs", "Both"), selected = "Both", inline = TRUE),
             hr(),
-            selectizeInput("filtro_familia", "Family/Families", choices  = NULL, multiple = TRUE, options  = list(placeholder = "Todas")),
-            selectizeInput("filtro_herencia", "Inheritance type", choices  = NULL, multiple = TRUE, options  = list(placeholder = "Todas")),
+            selectizeInput("filtro_familia", "Family/Families", choices  = NULL, multiple = TRUE, options  = list(placeholder = "All")),
+            selectizeInput("filtro_herencia", "Inheritance type", choices  = NULL, multiple = TRUE, options  = list(placeholder = "All")),
             selectizeInput("filtro_sv_type", "Variant type", choices  = NULL, multiple = TRUE, options  = list(placeholder = "All")),
             selectizeInput("filtro_rango", "Range type", choices  = c("Strict","Wide","Outside"), multiple = TRUE, options  = list(placeholder = "All")),
             selectInput("filtro_flagged", "🚩 Tags",
-                        choices  = c("Todas" = "todas", "Con Tag" = "con", "Sin Tag" = "sin"),
-                        selected = "todas"),
+                        choices  = c("All" = "All", "Con Tag" = "con", "Sin Tag" = "sin"),
+                        selected = "All"),
             selectInput("filtro_clasif", "🏷 Classification",
-                        choices  = c("Todas" = "todas", "Sin clasificar" = "sin",
+                        choices  = c("All" = "All", "Sin clasificar" = "sin",
                                      "Benign" = "Benign", "VUS" = "VUS",
                                      "Pathogenic" = "Pathogenic", "In Progress" = "In Progress"),
-                        selected = "todas"),
+                        selected = "All"),
             selectInput("filtro_sexo", "♂/♀ Sex",
                         choices  = c("All" = "all", "Male ♂" = "M", "Female ♀" = "F", "Unknown" = "ND"),
-                        selected = "todos"),
+                        selected = "all"),
             checkboxInput("filtro_sfari", "Gene panel only", value = FALSE),
             textInput("filtro_gen", "🔍 Search gene", placeholder = "E.g.: SHANK3, NRXN1...", width = "100%"),
             hr(),
@@ -701,7 +713,7 @@ ui <- page_navbar(
   ),
   
   # ============================================================
-  # TAB: GRAPHS (formerly Statistics)
+  # TAB: GRAPHS 
   # ============================================================
   nav_panel(
     title = tagList(bsicons::bs_icon("bar-chart-line-fill"), " Graphs"),
@@ -717,13 +729,13 @@ ui <- page_navbar(
             style = "background:var(--dm-info-bg); border:1px solid var(--dm-info-border);",
             tags$b(class = "small d-block mb-1", "\U0001f4ca Data source"),
             tags$small(class = "text-muted",
-                       "Los gr\u00e1ficos reflejan la selecci\u00f3n activa de ",
-                       tags$b("Results"), ": modalidad, familias, herencia, rango, SFARI, gen, score\u2026")
+                       "The graphics are updated to the current filtering of the",
+                       tags$b("Results"),"tab", ": modality, family, inheritance,score\u2026")
           ),
           hr(),
           uiOutput("ui_est_resumen_filtro"),
           hr(),
-          actionButton("btn_est_refresh", "\U0001f504 Recalcular", class = "btn-info btn-sm w-100"),
+          actionButton("btn_est_refresh", "\U0001f504 Reload", class = "btn-info btn-sm w-100"),
           div(class = "mt-2",
               actionButton("btn_ir_Results", "\u2190 Ir a Results",
                            class = "btn-outline-secondary btn-sm w-100"))
@@ -855,20 +867,67 @@ ui <- page_navbar(
     )
   ),
   
+  # =============================================================================
+  # IDEOGRAM — UI block (replaces the existing nav_panel for tab_ideograma)
+  # =============================================================================
   nav_menu(
-    title = tagList(bsicons::bs_icon("layers"), " Visualisation"),
-    align = "left",
+    title = "Visualización",
+    icon = bsicons::bs_icon("eye"),
     
-    nav_panel(
-      title = tagList(bsicons::bs_icon("map"), " Ideogram"),
-      value = "tab_ideograma",
+  # ── Drop-in replacement for the nav_panel ────────────────────────────────────
+  nav_panel(
+    title = tagList(bsicons::bs_icon("map"), " Ideogram"),
+    value = "tab_ideograma",
+    
+    layout_sidebar(
+      fillable = TRUE,
+      
+      # ── Sidebar ──────────────────────────────────────────────────────────────
+      sidebar = sidebar(
+        width  = 230,
+        open   = TRUE,
+        title  = tagList(bsicons::bs_icon("sliders"), " Options"),
+        
+        # Genome assembly
+        selectInput(
+          "ideo_genome",
+          tagList(bsicons::bs_icon("activity"), " Genome assembly"),
+          choices  = c("hg38", "hg19"),
+          selected = "hg38",
+          width    = "100%"
+        ),
+        
+        # Load / refresh bands button
+        actionButton(
+          "ideo_load_bands",
+          tagList(bsicons::bs_icon("cloud-download"), " Load cytobands"),
+          class = "btn-sm btn-outline-primary w-100 mt-1"
+        ),
+        
+        # Status indicator
+        uiOutput("ideo_band_status"),
+        
+        hr(),
+        
+        # Band legend
+        uiOutput("ideo_band_legend")
+      ),
+      
+      # ── Main card ─────────────────────────────────────────────────────────────
       card(
         card_header(
           class = "d-flex justify-content-between align-items-center",
-          div(bsicons::bs_icon("map"), " Interactive chromosomal ideogram — hg38"),
+          div(
+            bsicons::bs_icon("map"),
+            " Interactive chromosomal ideogram — ",
+            textOutput("ideo_genome_lbl", inline = TRUE)
+          ),
           div(
             class = "d-flex align-items-center gap-2",
-            tags$span(class = "text-muted small", "Color by inheritance · Hover for detail · Scroll to zoom")
+            tags$span(
+              class = "text-muted small",
+              "G-bands · Color by inheritance · Hover for detail · Scroll to zoom"
+            )
           )
         ),
         card_body(
@@ -876,8 +935,8 @@ ui <- page_navbar(
           plotlyOutput("plot_ideograma", height = "720px")
         )
       )
-    ),
-    
+    )
+  ),
     
     nav_panel(
       title = tagList(bsicons::bs_icon("columns-gap"), " Comparator"),
@@ -898,7 +957,7 @@ ui <- page_navbar(
                 tags$b("Family B", style="color:#E67E22;")),
             selectizeInput("comp_fam_b", NULL, choices=NULL, options=list(placeholder="Select...")),
             hr(),
-            radioButtons("comp_modalidad", "Modality", choices=c("CNVs","SVs","Ambas"), selected="Ambas", inline=TRUE),
+            radioButtons("comp_modalidad", "Modality", choices=c("CNVs","SVs","Both"), selected="Both", inline=TRUE),
             numericInput("comp_umbral", "Overlap threshold (%)", value=50, min=10, max=100, step=5),
             hr(),
             actionButton("btn_comparar", "⚖ Compare families", class="btn-primary w-100"),
@@ -1014,7 +1073,7 @@ ui <- page_navbar(
       )
     )
     
-  ),  # end nav_menu Visualisation
+  ), # end nav_menu Visualisation
   
   
   # ============================================================
@@ -1037,14 +1096,14 @@ ui <- page_navbar(
           # ── Selector de modo ──────────────────────────────────────────────
           div(class = "d-flex justify-content-center mb-2",
               radioButtons("test_modo_ui", NULL,
-                           choices  = c("\U0001f9ed Guiado" = "guiado",
-                                        "\u2699\ufe0f Experto"  = "experto"),
-                           selected = "guiado", inline = TRUE)
+                           choices  = c("\U0001f9ed Guided" = "Guided",
+                                        "\u2699\ufe0f Expert"  = "Expert"),
+                           selected = "Guided", inline = TRUE)
           ),
           
           # ── Technical selector (always in DOM for reactivity, visible only in expert mode) ──
           conditionalPanel(
-            condition = "input.test_modo_ui === \'experto\'",
+            condition = "input.test_modo_ui === \'Expert\'",
             selectInput("test_tipo", "\U0001f52c Tipo de test",
                         choices = c(
                           "Wilcoxon / Mann-Whitney (2 grupos)"  = "wilcoxon",
@@ -1064,13 +1123,13 @@ ui <- page_navbar(
             hr()
           ),
           
-          # ── Wizard guiado ─────────────────────────────────────────────────
+          # ── Wizard Guided ─────────────────────────────────────────────────
           uiOutput("ui_test_wizard_cards"),
           
           hr(),
           uiOutput("ui_test_params"),
           hr(),
-          actionButton("btn_ejecutar_test", "\u25b6 Ejecutar test",
+          actionButton("btn_Execute_test", "\u25b6 Execute test",
                        class = "btn-success w-100 fw-bold"),
           hr(),
           uiOutput("ui_test_ayuda")
@@ -1180,10 +1239,10 @@ ui <- page_navbar(
                   div(
                     tags$b("\u25b6\ufe0f Running the analysis"),
                     tags$p(class = "mb-0 text-muted",
-                           "Go to ", tags$b("Execution"), ". You can launch the full cohort,",
+                           "Go to ", tags$b("Run"), ". You can launch the full cohort,",
                            " a specific batch folder or an individual family (enter its ID, e.g. ",
                            tags$code("G06PlS056"), ").",
-                           " The execution log updates in real time.",
+                           " The Run log updates in real time.",
                            " Use ", tags$b("\u23f9 Stop"), " if you need to cancel the process.")
                   )
               ),
@@ -1288,8 +1347,8 @@ ui <- page_navbar(
                 "\u2502   \u2514\u2500\u2500 069-070MA/\n",
                 "...\n\n",
                 "Output folder/\n",
-                "\u251c\u2500\u2500 G06PlS056_Analisis_Completo.xlsx\n",
-                "\u251c\u2500\u2500 G07XY001_Analisis_Completo.xlsx\n",
+                "\u251c\u2500\u2500 G06PlS056_Complete_Analysis.xlsx\n",
+                "\u251c\u2500\u2500 G07XY001_Complete_Analysis.xlsx\n",
                 "\u251c\u2500\u2500 .flags_variantes.rds\n",
                 "\u251c\u2500\u2500 .notas_variantes.rds\n",
                 "\u251c\u2500\u2500 .clasificaciones_variantes.rds\n",
@@ -1449,7 +1508,7 @@ server <- function(input, output, session) {
   COLOR_AB <- "#27AE60"
   
   # ── Carpeta centralizada de logs ─────────────────────────────────────────
-  APP_LOGS_DIR <- file.path(getwd(), "logs")
+  APP_LOGS_DIR <- file.path(APP_DIR, "logs")
   if (!dir.exists(APP_LOGS_DIR)) dir.create(APP_LOGS_DIR, recursive = TRUE)
   # ─────────────────────────────────────────────────────────────────────────
   rv <- reactiveValues(
@@ -1470,6 +1529,234 @@ server <- function(input, output, session) {
     hpo_notas           = list(),      # named list: ID_Family -> patient HPO description
     pendiente_seleccion = NULL         # list(fam, sta, end) — seleccion pendiente en tabla
   )
+  # =============================================================================
+  # IDEOGRAM — Server logic
+  # =============================================================================
+  
+  # ── Constants ─────────────────────────────────────────────────────────────────
+  
+  BAND_COLORS <- c(
+    "gneg"    = "#FFFFFF",
+    "gpos25"  = "#C8C8C8",
+    "gpos50"  = "#969696",
+    "gpos75"  = "#646464",
+    "gpos100" = "#000000",
+    "acen"    = "#D92F27",
+    "gvar"    = "#DCDCDC",
+    "stalk"   = "#647FA4"
+  )
+  
+  CYTOBAND_URLS <- list(
+    hg38 = "https://hgdownload.cse.ucsc.edu/goldenPath/hg38/database/cytoBand.txt.gz",
+    hg19 = "https://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/cytoBand.txt.gz"
+  )
+  
+  # ── Reactive: fetch + cache cytoband data ─────────────────────────────────────
+  cytoband_data <- reactiveVal(NULL)
+  
+  observeEvent(input$ideo_load_bands, {
+    genome <- input$ideo_genome %||% "hg38"
+    url    <- CYTOBAND_URLS[[genome]]
+    
+    withProgress(message = paste("Downloading cytobands", genome, "…"), value = 0.3, {
+      tryCatch({
+        tmp <- tempfile(fileext = ".txt.gz")
+        download.file(url, destfile = tmp, quiet = TRUE, mode = "wb")
+        bands <- read.table(
+          gzfile(tmp), sep = "\t", header = FALSE,
+          col.names = c("chrom", "chromStart", "chromEnd", "name", "gieStain"),
+          stringsAsFactors = FALSE
+        )
+        # FIX 1: usar ignore.case = TRUE en lugar de flag inline (?i) sin perl = TRUE
+        bands$chr_clean <- toupper(gsub("^chr", "", bands$chrom, ignore.case = TRUE))
+        bands$color     <- BAND_COLORS[bands$gieStain]
+        bands$color[is.na(bands$color)] <- "#EEEEEE"
+        
+        cytoband_data(list(genome = genome, bands = bands))
+        setProgress(1)
+      }, error = function(e) {
+        cytoband_data(list(genome = genome, bands = NULL, error = e$message))
+      })
+    })
+  }, ignoreNULL = TRUE)
+  
+  # ── Status badge ──────────────────────────────────────────────────────────────
+  output$ideo_band_status <- renderUI({
+    d <- cytoband_data()
+    if (is.null(d)) {
+      return(div(class = "text-muted small mt-1 fst-italic",
+                 "Bands not loaded. Press the button above."))
+    }
+    if (!is.null(d$error)) {
+      return(div(class = "alert alert-danger p-1 mt-1 small",
+                 bsicons::bs_icon("exclamation-triangle"),
+                 " Error: ", d$error))
+    }
+    n <- nrow(d$bands)
+    div(class = "alert alert-success p-1 mt-1 small",
+        bsicons::bs_icon("check-circle"),
+        paste0(" ", d$genome, " · ", n, " bands loaded"))
+  })
+  
+  # ── Band colour legend ────────────────────────────────────────────────────────
+  output$ideo_band_legend <- renderUI({
+    labels <- c(
+      "gneg"    = "Negative (light)",
+      "gpos25"  = "gpos 25%",
+      "gpos50"  = "gpos 50%",
+      "gpos75"  = "gpos 75%",
+      "gpos100" = "gpos 100% (dark)",
+      "acen"    = "Centromere",
+      "gvar"    = "Variable",
+      "stalk"   = "Stalk"
+    )
+    div(
+      tags$p(class = "fw-bold mb-1", style = "font-size:0.82em;",
+             bsicons::bs_icon("palette"), " G-band legend"),
+      lapply(names(BAND_COLORS), function(k) {
+        bg  <- BAND_COLORS[[k]]
+        txt <- if (k %in% c("gpos75", "gpos100")) "#333333" else "#333333"
+        div(
+          class = "d-flex align-items-center gap-1 mb-1",
+          div(style = paste0(
+            "width:18px; height:12px; border-radius:2px;",
+            "background:", bg, "; border:1px solid #AAAAAA;"
+          )),
+          tags$span(style = paste0("font-size:0.76em; color:", txt, ";"), labels[[k]])
+        )
+      })
+    )
+  })
+  
+  # ── Genome label in card header ───────────────────────────────────────────────
+  output$ideo_genome_lbl <- renderText({
+    d <- cytoband_data()
+    if (!is.null(d) && is.null(d$error)) d$genome else (input$ideo_genome %||% "hg38")
+  })
+  
+  output$plot_ideograma <- renderPlotly({
+    df <- datos_filtrados()
+    req(nrow(df) > 0)
+    
+    # 1. Preparar datos
+    if ("Annotation_mode" %in% names(df)) {
+      df <- df[!is.na(df$Annotation_mode) & df$Annotation_mode == "full", , drop = FALSE]
+    }
+    req(nrow(df) > 0)
+    
+    df$chr_clean <- toupper(trimws(gsub("(?i)^chr", "", as.character(df$SV_chrom), perl = TRUE)))
+    df$start_num <- suppressWarnings(as.numeric(df$SV_start))
+    df$end_num   <- suppressWarnings(as.numeric(df$SV_end))
+    df$her_base  <- her_base(df$Tipo_Herencia)
+    df$score_lbl <- ifelse(is.na(df$AnnotSV_ranking_score), "—", as.character(df$AnnotSV_ranking_score))
+    
+    df <- df[df$chr_clean %in% CHR_ORDER & !is.na(df$start_num) & !is.na(df$end_num), , drop = FALSE]
+    req(nrow(df) > 0)
+    
+    # Índice vertical de cromosomas (chr1 arriba)
+    chr_idx <- setNames(seq_along(CHR_ORDER), CHR_ORDER)
+    
+    fig <- plot_ly(source = "ideogram_interactivo")
+    
+    # 2. DIBUJAR CROMOSOMAS Y BANDAS (Estilo KaryoploteR)
+    d_bands <- cytoband_data()
+    if (!is.null(d_bands) && is.null(d_bands$error) && nrow(d_bands$bands) > 0) {
+      bands <- d_bands$bands
+      for (chr in CHR_ORDER) {
+        b_chr <- bands[bands$chr_clean == chr, ]
+        if (nrow(b_chr) == 0) next
+        
+        # Dibuja las bandas G
+        fig <- add_trace(fig,
+                         type = "bar", orientation = "h",
+                         x = b_chr$chromEnd - b_chr$chromStart,
+                         y = rep(chr_idx[chr], nrow(b_chr)),
+                         base = b_chr$chromStart,
+                         width = 0.35, # Grosor del cromosoma
+                         marker = list(
+                           color = b_chr$color,
+                           line = list(color = "#555555", width = 0.3)
+                         ),
+                         text = paste0("Banda: ", b_chr$name),
+                         hoverinfo = "text",
+                         name = paste0("chr", chr),
+                         showlegend = FALSE,
+                         legendgroup = "Cromosomas"
+        )
+      }
+    } else {
+      # Si no se han cargado las bandas, dibuja un cromosoma gris de fondo
+      for (chr in CHR_ORDER) {
+        if (!chr %in% names(CHR_LENGTHS)) next
+        fig <- add_trace(fig,
+                         type = "bar", orientation = "h",
+                         x = CHR_LENGTHS[chr], y = chr_idx[chr], base = 0, width = 0.35,
+                         marker = list(color = "#E0E0E0", line = list(color = "#BDBDBD", width = 0.8)),
+                         hoverinfo = "none", showlegend = FALSE, legendgroup = "Cromosomas"
+        )
+      }
+    }
+    
+    # 3. DIBUJAR VARIANTES (Ligeramente desplazadas hacia abajo para no tapar las bandas)
+    her_levels <- setdiff(unique(df$her_base), NA)
+    for (her in her_levels) {
+      df_h <- df[!is.na(df$her_base) & df$her_base == her, , drop = FALSE]
+      if (nrow(df_h) == 0) next
+      col <- HER_COLORS[her]; if (is.na(col)) col <- "#AAAAAA"
+      
+      # Forzar anchura mínima para que las variantes pequeñas no desaparezcan al hacer zoom out
+      widths <- pmax(df_h$end_num - df_h$start_num, CHR_LENGTHS[df_h$chr_clean] * 0.015, na.rm = TRUE)
+      
+      fig <- add_trace(fig,
+                       type = "bar", orientation = "h",
+                       x = widths,
+                       y = chr_idx[df_h$chr_clean] - 0.3, # Desplazamiento hacia abajo (track de anotación)
+                       base = df_h$start_num,
+                       width = 0.15, # Más finitas que el cromosoma
+                       marker = list(color = paste0(col, "CC"), line = list(color = col, width = 0.5)),
+                       name = her, legendgroup = her, showlegend = TRUE,
+                       text = paste0(
+                         "<b>Familia:</b> ",   df_h$ID_Familia,   "<br>",
+                         "<b>Region:</b> chr", df_h$chr_clean, ":", format(df_h$start_num, big.mark=".", scientific=FALSE),
+                         "–", format(df_h$end_num, big.mark=".", scientific=FALSE), "<br>",
+                         "<b>Tipo:</b> ",      df_h$SV_type,      "<br>",
+                         "<b>Herencia:</b> ",  her,               "<br>",
+                         "<b>Score:</b> ",     df_h$score_lbl
+                       ),
+                       hovertemplate = "%{text}<extra></extra>"
+      )
+    }
+    
+    # 4. MARCAR LA VARIANTE SELECCIONADA CON UNA FLECHA (▼)
+    if (!is.null(rv$fila_data) && nrow(rv$fila_data) > 0) {
+      sel <- rv$fila_data
+      chr_sel <- toupper(trimws(gsub("(?i)^chr", "", as.character(sel$SV_chrom[1]), perl = TRUE)))
+      if (chr_sel %in% CHR_ORDER) {
+        sta_sel <- suppressWarnings(as.numeric(sel$SV_start[1]))
+        end_sel <- suppressWarnings(as.numeric(sel$SV_end[1]))
+        
+        if (!is.na(sta_sel) && !is.na(end_sel)) {
+          fig <- add_trace(fig,
+                           type = "scatter", mode = "markers",
+                           x = (sta_sel + end_sel) / 2,
+                           y = chr_idx[chr_sel] - 0.35, # Flecha justo encima del cromosoma
+                           marker = list(symbol = "triangle-down", size = 12, color = "#F39C12", line=list(color="#D35400", width=1)),
+                           name = "Selección", showlegend = FALSE, hoverinfo = "none"
+          )
+        }
+      }
+    }
+    
+    # 5. LAYOUT FINAL
+    layout(fig,
+           barmode = "overlay",
+           xaxis = list(title = "Posición genómica (pb)", tickformat = ",.0f", showgrid = TRUE, gridcolor = "#F0F0F0"),
+           yaxis = list(title = "", tickvals = seq_along(CHR_ORDER), ticktext = paste0("chr", CHR_ORDER), autorange = "reversed", tickfont = list(size = 11)),
+           legend = list(title = list(text = "<b>Herencia</b>"), orientation = "h", y = -0.08, x = 0, font = list(size = 11)),
+           margin  = list(l = 65, r = 20, t = 15, b = 70),
+           plot_bgcolor  = "#FAFAFA", paper_bgcolor = "#FFFFFF", height  = 720
+    )
+  })
   # ── GUARDAR EL TEXTO "FANTASMA" MIENTRAS SE TECLEA ──
   observeEvent(input$input_nota_variante, {
     rv$nota_fantasma <- input$input_nota_variante
@@ -1639,7 +1926,14 @@ server <- function(input, output, session) {
       deduplicar          = input$cfg_dedup,
       n_cores             = input$cfg_cores
     )
-    showNotification("✅ Configuration saved.", type = "message", duration = 3)
+    
+    # Guardar permanentemente en el disco duro
+    tryCatch({
+      saveRDS(rv$config_guardada, file.path(APP_LOGS_DIR, ".config.rds"))
+      showNotification("✅ Configuration saved permanently.", type = "message", duration = 3)
+    }, error = function(e) {
+      showNotification(paste("❌ Error saving config:", e$message), type = "error")
+    })
   })
   
   output$ui_validacion_rutas <- renderUI({
@@ -1659,8 +1953,22 @@ server <- function(input, output, session) {
   })
   
   construir_script_run <- function(id_familia = NULL, ruta_carpeta = NULL) {
-    cfg <- rv$config_guardada
-    # Normalizar todas las rutas a barras forward para evitar secuencias de escape en el script generado
+    # Always read current UI input values directly so the paths the user
+    # typed are used even if they have not pressed 'Save configuration'.
+    cfg <- list(
+      ruta_entrada        = trimws(input$cfg_entrada),
+      ruta_salida         = trimws(input$cfg_salida),
+      ruta_rangos         = trimws(input$cfg_rangos),
+      ruta_panel          = trimws(input$cfg_panel),
+      umbral_strict       = input$cfg_umbral_strict,
+      umbral_herencia     = input$cfg_umbral_her,
+      umbral_herencia_lax = input$cfg_umbral_her_lax,
+      umbral_jaccard      = input$cfg_umbral_jaccard,
+      margen_lateral      = input$cfg_margen * 1e6,
+      deduplicar          = input$cfg_dedup,
+      n_cores             = input$cfg_cores
+    )
+    rv$config_guardada <- cfg  # keep rv in sync
     cfg$ruta_entrada <- gsub("\\", "/", cfg$ruta_entrada, fixed = TRUE)
     cfg$ruta_salida  <- gsub("\\", "/", cfg$ruta_salida,  fixed = TRUE)
     cfg$ruta_rangos  <- gsub("\\", "/", cfg$ruta_rangos,  fixed = TRUE)
@@ -1832,12 +2140,12 @@ server <- function(input, output, session) {
       )
       rv$Results <- datos
       
-      todas <- bind_rows(datos$CNVs, datos$SVs)
-      if (nrow(todas) > 0) {
-        fams   <- sort(unique(as.character(todas$ID_Familia)))
-        hers   <- sort(unique(her_base(todas$Tipo_Herencia)))
+      All <- bind_rows(datos$CNVs, datos$SVs)
+      if (nrow(All) > 0) {
+        fams   <- sort(unique(as.character(All$ID_Familia)))
+        hers   <- sort(unique(her_base(All$Tipo_Herencia)))
         hers   <- hers[!is.na(hers) & hers != "NA"]
-        tipos  <- sort(unique(as.character(todas$SV_type)))
+        tipos  <- sort(unique(as.character(All$SV_type)))
         
         updateSelectizeInput(session, "filtro_sv_type", choices = tipos, server = TRUE)
         updateSelectizeInput(session, "filtro_familia",  choices = fams, server = TRUE)
@@ -1846,7 +2154,7 @@ server <- function(input, output, session) {
         updateSelectInput(session, "pdf_familia_sel", choices = c("— Select family —" = "", setNames(fams, fams)))
         updateSelectizeInput(session, "filtro_herencia", choices = hers, server = TRUE)
         
-        scores <- suppressWarnings(as.numeric(todas$AnnotSV_ranking_score))
+        scores <- suppressWarnings(as.numeric(All$AnnotSV_ranking_score))
         scores <- scores[is.finite(scores)]
         if (length(scores) > 0)
           updateSliderInput(session, "filtro_score", min = floor(min(scores) * 10) / 10, max = ceiling(max(scores) * 10) / 10, value = floor(min(scores) * 10) / 10)
@@ -1855,7 +2163,7 @@ server <- function(input, output, session) {
       incProgress(0.3, message = "Detecting similar variants...")
       umbral <- isolate(input$cfg_umbral_strict) %||% 0.70
       res_auto <- tryCatch(
-        detectar_similares_interindividuales(todas, umbral_sim = umbral, verbose = TRUE),
+        detectar_similares_interindividuales(All, umbral_sim = umbral, verbose = TRUE),
         error = function(e) list(claves = character(0), n_pares = 0L, n_variantes = 0L)
       )
       auto          <- res_auto$claves
@@ -1896,9 +2204,9 @@ server <- function(input, output, session) {
     df <- switch(modalidad,
                  "CNVs"  = datos$CNVs %||% data.frame(),
                  "SVs"   = datos$SVs  %||% data.frame(),
-                 "Ambas" = {
-                   cnv <- if (!is.null(datos$CNVs)) mutate(datos$CNVs, Modalidad = "CNV") else data.frame()
-                   sv  <- if (!is.null(datos$SVs))  mutate(datos$SVs,  Modalidad = "SV")  else data.frame()
+                 "Both" = {
+                   cnv <- if (!is.null(datos$CNVs)) mutate(datos$CNVs, Modality = "CNV") else data.frame()
+                   sv  <- if (!is.null(datos$SVs))  mutate(datos$SVs,  Modality = "SV")  else data.frame()
                    bind_rows(cnv, sv)
                  }
     )
@@ -1906,11 +2214,11 @@ server <- function(input, output, session) {
     
     if (length(input$filtro_familia) > 0) df <- df[df$ID_Familia %in% input$filtro_familia, ]
     sexo_sel <- input$filtro_sexo
-    if (!is.null(sexo_sel) && sexo_sel != "todos") {
-      todas_fams_df <- unique(as.character(df$ID_Familia))
+    if (!is.null(sexo_sel) && sexo_sel != "all") {
+      All_fams_df <- unique(as.character(df$ID_Familia))
       fams_conocidas <- names(rv$sexos)[vapply(rv$sexos, function(s) nzchar(s %||% ""), logical(1))]
       if (sexo_sel == "ND") {
-        df <- df[df$ID_Familia %in% setdiff(todas_fams_df, fams_conocidas), , drop = FALSE]
+        df <- df[df$ID_Familia %in% setdiff(All_fams_df, fams_conocidas), , drop = FALSE]
       } else {
         fams_sexo <- names(rv$sexos)[vapply(rv$sexos, function(s) identical(s, sexo_sel), logical(1))]
         df <- df[df$ID_Familia %in% fams_sexo, , drop = FALSE]
@@ -1926,7 +2234,7 @@ server <- function(input, output, session) {
       df <- df[grepl(patron, df$Gene_name, ignore.case = TRUE, perl = TRUE), , drop = FALSE]
     }
     flag_sel <- input$filtro_flagged
-    if (!is.null(flag_sel) && flag_sel != "todas") {
+    if (!is.null(flag_sel) && flag_sel != "All") {
       claves_df <- hacer_clave_variante(df)
       if (length(claves_df) == nrow(df)) {
         tiene_Tag <- !is.na(claves_df) & (claves_df %in% rv$flags | claves_df %in% rv$flags_auto)
@@ -1937,7 +2245,7 @@ server <- function(input, output, session) {
       }
     }
     clasif_sel <- input$filtro_clasif
-    if (!is.null(clasif_sel) && clasif_sel != "todas") {
+    if (!is.null(clasif_sel) && clasif_sel != "All") {
       claves_df <- hacer_clave_variante(df)
       if (length(claves_df) == nrow(df)) {
         clasif_df <- vapply(claves_df, function(k) {
@@ -1997,7 +2305,7 @@ server <- function(input, output, session) {
   
   output$tabla_variantes <- renderDT({
     df <- datos_filtrados()
-    if (nrow(df) == 0) return(datatable(data.frame(Mensaje = "No variants with current filters"), options = list(dom = "t"), rownames = FALSE))
+    if (nrow(df) == 0) return(datatable(data.frame(Message = "No variants with current filters"), options = list(dom = "t"), rownames = FALSE))
     
     archivo_col <- if ("._archivo_" %in% names(df)) df$`._archivo_` else rep(NA, nrow(df))
     cols_vis <- intersect(cols_usuario(), names(df))
@@ -2155,7 +2463,7 @@ server <- function(input, output, session) {
       end <- as.character(fd$SV_end[1])
       sty <- toupper(trimws(as.character(fd$SV_type[1])))
       
-      modalidad_fila <- if ("Modality" %in% names(fd)) as.character(fd$Modalidad[1]) else "SV"
+      modalidad_fila <- if ("Modality" %in% names(fd)) as.character(fd$Modality[1]) else "SV"
       ruta_tsv_hijo  <- tryCatch(encontrar_archivo_hijo(isolate(input$cfg_entrada), archivo, as.character(fd$ID_Familia[1]), modalidad_fila), error = function(e) NA_character_)
       if (!is.na(ruta_tsv_hijo) && file.exists(ruta_tsv_hijo)) {
         hijo_btn <- actionButton("btn_abrir_hijo", "👫 Open proband TSV", class = "btn-outline-primary btn-sm", style = "font-weight:600;")
@@ -2291,15 +2599,15 @@ server <- function(input, output, session) {
       es_manual  <- !is.na(clave_sel) && clave_sel %in% rv$flags
       es_auto_f  <- !is.na(clave_sel) && clave_sel %in% rv$flags_auto
       if (es_manual || es_auto_f) {
-        todas_df <- tryCatch({
+        All_df <- tryCatch({
           bind_rows(
-            if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modalidad = "CNV") else data.frame(),
-            if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modalidad = "SV")  else data.frame()
+            if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modality = "CNV") else data.frame(),
+            if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modality = "SV")  else data.frame()
           )
         }, error = function(e) data.frame())
         umbral_f <- isolate(input$cfg_umbral_strict) %||% 0.70
-        sim_claves <- if (!is.na(clave_sel) && nrow(todas_df) > 0)
-          tryCatch(detectar_similares_a_clave(clave_sel, todas_df, umbral_sim = umbral_f),
+        sim_claves <- if (!is.na(clave_sel) && nrow(All_df) > 0)
+          tryCatch(detectar_similares_a_clave(clave_sel, All_df, umbral_sim = umbral_f),
                    error = function(e) character(0))
         else character(0)
         fams_sim <- if (length(sim_claves) > 0)
@@ -2362,10 +2670,6 @@ server <- function(input, output, session) {
         )
       )
     }
-    # --- Nota de la variante seleccionada ---
-    clave_nota <- if (!is.null(rv$fila_data) && nrow(rv$fila_data) > 0)
-      tryCatch(hacer_clave_variante(rv$fila_data)[1], error = function(e) NA_character_)
-    else NA_character_
     
     # --- Nota de la variante seleccionada ---
     clave_nota <- if (!is.null(rv$fila_data) && nrow(rv$fila_data) > 0)
@@ -2388,7 +2692,7 @@ server <- function(input, output, session) {
           # Siempre cerrado al renderizar
           tags$summary(
             style = "cursor:pointer; font-weight:600; font-size:0.9em; color:#2C6FAC; user-select:none; list-style:none; display:flex; align-items:center; gap:6px;",
-            tags$span("\U0001f4dd Anotaciones de esta variante"),
+            tags$span("\U0001f4dd Variant annotations"),
             # Recuadrito azul con preview
             if (tiene_nota)
               tags$span(
@@ -2427,19 +2731,19 @@ server <- function(input, output, session) {
     fam_sel_det <- if (!is.null(rv$fila_data) && nrow(rv$fila_data) > 0)
       as.character(rv$fila_data$ID_Familia[1]) else NULL
     sexo_actual_det <- if (!is.null(fam_sel_det)) rv$sexos[[fam_sel_det]] %||% "" else ""
-    btn_varon <- if (!is.null(fam_sel_det)) {
+    btn_Male <- if (!is.null(fam_sel_det)) {
       active_v <- identical(sexo_actual_det, "M")
-      actionButton("btn_sexo_varon",
+      actionButton("btn_sexo_Male",
                    label = if (active_v) "♂ Male ✓" else "♂ Male",
                    class = if (active_v) "btn-primary btn-sm" else "btn-outline-primary btn-sm",
                    title = if (active_v) "Marked — click to unmark" else "Mark as Male")
     } else NULL
-    btn_mujer <- if (!is.null(fam_sel_det)) {
+    btn_Female <- if (!is.null(fam_sel_det)) {
       active_f <- identical(sexo_actual_det, "F")
-      actionButton("btn_sexo_mujer",
+      actionButton("btn_sexo_Female",
                    label = if (active_f) "♀ Female ✓" else "♀ Female",
                    class = if (active_f) "btn-danger btn-sm" else "btn-outline-danger btn-sm",
-                   title = if (active_f) "Marked — click to unmark" else "Marcar como Mujer")
+                   title = if (active_f) "Marked — click to unmark" else "Marcar como Female")
     } else NULL
     tagList(
       div(class = "d-flex align-items-center flex-wrap gap-2 mb-1",
@@ -2457,7 +2761,7 @@ server <- function(input, output, session) {
                     tags$b("Sex:"),
                     if (!is.null(fam_sel_det)) tags$span(class = "ms-1 text-secondary", paste0("(", fam_sel_det, ")"))
           ),
-          btn_varon, btn_mujer,
+          btn_Male, btn_Female,
           if (!is.null(fam_sel_det) && nzchar(sexo_actual_det))
             actionButton("btn_sexo_borrar", "× Unmark",
                          class = "btn-outline-secondary btn-sm",
@@ -2547,14 +2851,14 @@ server <- function(input, output, session) {
     texto <- isolate(input$input_nota_variante)
     rv$notas[[clave]] <- texto
     
-    todas_df <- tryCatch({
+    All_df <- tryCatch({
       bind_rows(
-        if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modalidad = "CNV") else data.frame(),
-        if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modalidad = "SV")  else data.frame()
+        if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modality = "CNV") else data.frame(),
+        if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modality = "SV")  else data.frame()
       )
     }, error = function(e) data.frame())
     umbral <- isolate(input$cfg_umbral_strict) %||% 0.70
-    similares <- tryCatch(detectar_similares_a_clave(clave, todas_df, umbral_sim = umbral),
+    similares <- tryCatch(detectar_similares_a_clave(clave, All_df, umbral_sim = umbral),
                           error = function(e) character(0))
     n_rep <- 0L
     for (k in similares) {
@@ -2654,7 +2958,7 @@ server <- function(input, output, session) {
   })
   
   # ---- Sexo del probando ------------------------------------------------
-  observeEvent(input$btn_sexo_varon, {
+  observeEvent(input$btn_sexo_Male, {
     fd <- rv$fila_data; req(!is.null(fd), nrow(fd) > 0)
     fam <- as.character(fd$ID_Familia[1])
     if (identical(rv$sexos[[fam]], "M")) { rv$sexos[[fam]] <- NULL
@@ -2662,13 +2966,13 @@ server <- function(input, output, session) {
     } else { rv$sexos[[fam]] <- "M"
     showNotification(paste0("♂ ", fam, " marked as Male."), type="message", duration=2) }
   })
-  observeEvent(input$btn_sexo_mujer, {
+  observeEvent(input$btn_sexo_Female, {
     fd <- rv$fila_data; req(!is.null(fd), nrow(fd) > 0)
     fam <- as.character(fd$ID_Familia[1])
     if (identical(rv$sexos[[fam]], "F")) { rv$sexos[[fam]] <- NULL
     showNotification(paste0("Sexo de ", fam, " desmarcado."), type="message", duration=2)
     } else { rv$sexos[[fam]] <- "F"
-    showNotification(paste0("♀ ", fam, " marcado como Mujer."), type="message", duration=2) }
+    showNotification(paste0("♀ ", fam, " marcado como Female."), type="message", duration=2) }
   })
   observeEvent(input$btn_sexo_borrar, {
     fd <- rv$fila_data; req(!is.null(fd), nrow(fd) > 0)
@@ -2680,7 +2984,7 @@ server <- function(input, output, session) {
   observeEvent(input$btn_abrir_hijo, {
     req(rv$fila_data)
     fd <- rv$fila_data
-    modalidad_fila <- if ("Modality" %in% names(fd)) as.character(fd$Modalidad[1]) else "SV"
+    modalidad_fila <- if ("Modality" %in% names(fd)) as.character(fd$Modality[1]) else "SV"
     ruta_tsv <- tryCatch(encontrar_archivo_hijo(input$cfg_entrada, rv$fila_seleccionada, as.character(fd$ID_Familia[1]), modalidad_fila), error = function(e) NA_character_)
     if (is.na(ruta_tsv) || !file.exists(ruta_tsv)) {
       showNotification(paste0("❌ Proband TSV not found for family ", fd$ID_Familia[1], "."), type = "error", duration = 6)
@@ -2701,14 +3005,14 @@ server <- function(input, output, session) {
       showNotification("🏳 Tag removed.", type = "warning", duration = 2)
     } else {
       rv$flags <- union(rv$flags, clave)
-      todas_df <- tryCatch({
+      All_df <- tryCatch({
         bind_rows(
-          if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modalidad = "CNV") else data.frame(),
-          if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modalidad = "SV")  else data.frame()
+          if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modality = "CNV") else data.frame(),
+          if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modality = "SV")  else data.frame()
         )
       }, error = function(e) data.frame())
       umbral <- isolate(input$cfg_umbral_strict) %||% 0.70
-      similares <- tryCatch(detectar_similares_a_clave(clave, todas_df, umbral_sim = umbral),
+      similares <- tryCatch(detectar_similares_a_clave(clave, All_df, umbral_sim = umbral),
                             error = function(e) character(0))
       # Auto-tag solo si la variante tiene MAS de 2 similares interindividuales
       n_sim <- length(similares)
@@ -2835,14 +3139,14 @@ server <- function(input, output, session) {
         return(invisible(NULL))
       }
       
-      todas_df <- tryCatch({
+      All_df <- tryCatch({
         bind_rows(
-          if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modalidad = "CNV") else data.frame(),
-          if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modalidad = "SV")  else data.frame()
+          if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modality = "CNV") else data.frame(),
+          if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modality = "SV")  else data.frame()
         )
       }, error = function(e) data.frame())
       
-      if (nrow(todas_df) == 0) {
+      if (nrow(All_df) == 0) {
         showNotification("No data loaded. Use 'Load / Refresh' first.", type = "error", duration = 5)
         grDevices::pdf(file, width = 11.69, height = 8.27)
         grid::grid.text("No data loaded.", x = 0.5, y = 0.5, gp = grid::gpar(fontsize = 14))
@@ -2851,7 +3155,7 @@ server <- function(input, output, session) {
       }
       
       n_fichas_est <- nrow(tryCatch({
-        df_tmp <- todas_df[as.character(todas_df$ID_Familia) == fam, , drop = FALSE]
+        df_tmp <- All_df[as.character(All_df$ID_Familia) == fam, , drop = FALSE]
         if ("Annotation_mode" %in% names(df_tmp))
           df_tmp <- df_tmp[!is.na(df_tmp$Annotation_mode) & df_tmp$Annotation_mode == "full", , drop = FALSE]
         sc_tmp <- suppressWarnings(as.numeric(df_tmp$AnnotSV_ranking_score))
@@ -2869,7 +3173,7 @@ server <- function(input, output, session) {
         tryCatch({
           
           # ── Datos de la familia ─────────────────────────────────────────────
-          df_fam <- todas_df[as.character(todas_df$ID_Familia) == fam, , drop = FALSE]
+          df_fam <- All_df[as.character(All_df$ID_Familia) == fam, , drop = FALSE]
           if ("Annotation_mode" %in% names(df_fam))
             df_full <- df_fam[!is.na(df_fam$Annotation_mode) & df_fam$Annotation_mode == "full", , drop = FALSE]
           else
@@ -3537,7 +3841,7 @@ server <- function(input, output, session) {
                      x = "", y = "Score") +
                 tema_pdf + theme(axis.text.x = element_text(angle = 22, hjust = 1, size = 7))
             } else {
-              ggplot(df_full[is.finite(df_full$score_n),], aes(x = "Todas", y = score_n)) +
+              ggplot(df_full[is.finite(df_full$score_n),], aes(x = "All", y = score_n)) +
                 geom_jitter(width=0.1, color="#2980B9", size=2, alpha=0.7) +
                 geom_hline(yintercept=0.5, color="#C0392B", linetype="dashed", linewidth=0.6) +
                 labs(title = "Score AnnotSV", x = "", y = "Score") + tema_pdf
@@ -3713,7 +4017,7 @@ server <- function(input, output, session) {
               list("Score AnnotSV",         if(!is.na(row$score_n)) sprintf("%.4f", row$score_n) else "--"),
               list("Clinical classification", clasif_val),
               list("SFARI gene",             if(row$en_sfari) "YES - in SFARI panel" else "No"),
-              list("Modality",             if("Modality"%in%names(row)) as.character(row$Modalidad) else "--"),
+              list("Modality",             if("Modality"%in%names(row)) as.character(row$Modality) else "--"),
               list("Family phenotype",     {
                 ft <- rv$fenotipos[[fam]] %||% ""
                 if (nzchar(trimws(ft)))
@@ -3770,7 +4074,7 @@ server <- function(input, output, session) {
             pagina_ficha <- (i - 1) * 3 + 5   # each variant: 1 clinical + 2 screenshots = 3 pages
             pie_pagina(pagina_ficha)
             
-            # ── Construir todas las URLs ─────────────────────────────────────
+            # ── Construir All las URLs ─────────────────────────────────────
             sty_up  <- toupper(trimws(if("SV_type"%in%names(row)) as.character(row$SV_type) else "CNV"))
             gene1   <- trimws(strsplit(genes_str, "[,/|]")[[1]][1])
             if (is.na(gene1) || gene1 == "--") gene1 <- ""
@@ -4150,7 +4454,7 @@ server <- function(input, output, session) {
   output$ui_est_kpis <- renderUI({
     df <- est_datos()
     if (nrow(df) == 0)
-      return(div(class="alert alert-warning", "\u26a0 Sin datos. Carga Results primero."))
+      return(div(class="alert alert-warning", "\u26a0 No data. Load results first."))
     n_var    <- nrow(df)
     n_fam    <- length(unique(as.character(df$ID_Familia)))
     n_denovo <- sum(!is.na(df$her_limpia) & df$her_limpia == "De novo")
@@ -4162,9 +4466,9 @@ server <- function(input, output, session) {
     sc_med_s <- if (is.nan(sc_med)) "\u2014" else as.character(sc_med)
     tam_med  <- round(median(df$tamano_kb,na.rm=TRUE),1)
     # Sexo
-    n_varones <- if ("sexo" %in% names(df)) length(unique(df$ID_Familia[df$sexo=="M"])) else 0
-    n_mujeres <- if ("sexo" %in% names(df)) length(unique(df$ID_Familia[df$sexo=="F"])) else 0
-    n_sex_nd  <- n_fam - n_varones - n_mujeres
+    n_Malees <- if ("sexo" %in% names(df)) length(unique(df$ID_Familia[df$sexo=="M"])) else 0
+    n_Femalees <- if ("sexo" %in% names(df)) length(unique(df$ID_Familia[df$sexo=="F"])) else 0
+    n_sex_nd  <- n_fam - n_Malees - n_Femalees
     kpi <- function(icono, titulo, valor, color="#2C6FAC", subtitulo=NULL) {
       div(class="card h-100", style=paste0("border-left:5px solid ",color,"; border-radius:8px;"),
           div(class="card-body p-3",
@@ -4187,10 +4491,10 @@ server <- function(input, output, session) {
                      kpi("\U0001f4cf","Tam. mediano",  paste0(tam_med," Kb"),"#16A085","variant")
       ),
       layout_columns(col_widths=c(4,4,4),
-                     kpi("\u2642","Males (families)", format(n_varones,big.mark="."), "#2980B9",
-                         if(n_fam>0) paste0(round(n_varones/n_fam*100,1),"% de familias") else NULL),
-                     kpi("\u2640","Females (families)", format(n_mujeres,big.mark="."), "#C0392B",
-                         if(n_fam>0) paste0(round(n_mujeres/n_fam*100,1),"% de familias") else NULL),
+                     kpi("\u2642","Males (families)", format(n_Malees,big.mark="."), "#2980B9",
+                         if(n_fam>0) paste0(round(n_Malees/n_fam*100,1),"% de familias") else NULL),
+                     kpi("\u2640","Females (families)", format(n_Femalees,big.mark="."), "#C0392B",
+                         if(n_fam>0) paste0(round(n_Femalees/n_fam*100,1),"% de familias") else NULL),
                      kpi("\u2753","Unknown sex",   format(n_sex_nd,big.mark="."),  "#7F8C8D",
                          "families without recorded sex")
       )
@@ -4357,8 +4661,8 @@ server <- function(input, output, session) {
                                    line=list(color=col,width=0.5)),
                        text=paste0("Family:",sub$ID_Familia,"<br>",h,"<br>",
                                    round(sub$tamano_kb,1)," Kb \u00b7 Score:",round(sub$score_num,3),
-                                   "<br>Sexo:",ifelse(sub$sexo=="M","\u2642 Var\u00f3n",
-                                                      ifelse(sub$sexo=="F","\u2640 Mujer","ND"))),
+                                   "<br>Sexo:",ifelse(sub$sexo=="M","\u2642 Male",
+                                                      ifelse(sub$sexo=="F","\u2640 Female","ND"))),
                        hovertemplate="%{text}<extra></extra>")
     }
     layout(fig,
@@ -4367,7 +4671,7 @@ server <- function(input, output, session) {
            yaxis=list(title="AnnotSV score"),
            legend=list(orientation="h",y=-0.25,x=0,font=list(size=10)),
            annotations=list(list(x=1,y=1.05,xref="paper",yref="paper",showarrow=FALSE,align="right",
-                                 text="\u25b2 Var\u00f3n &nbsp; \u25cf Mujer &nbsp; \u25a0 ND",
+                                 text="\u25b2 Male &nbsp; \u25cf Female &nbsp; \u25a0 ND",
                                  font=list(size=10,color="#555"))),
            margin=list(b=80,l=60,r=10,t=30),plot_bgcolor="#FAFAFA",paper_bgcolor="#FFFFFF")
   })
@@ -4454,7 +4758,7 @@ server <- function(input, output, session) {
   
   # ── Plots stratified by sex ─────────────────────────────────────
   SEX_COLORS <- c("M" = "#2980B9", "F" = "#C0392B", "ND" = "#95A5A6")
-  SEX_LABELS <- c("M" = "Var\u00f3n \u2642", "F" = "Mujer \u2640", "ND" = "Unknown")
+  SEX_LABELS <- c("M" = "Male \u2642", "F" = "Female \u2640", "ND" = "Unknown")
   
   output$est_plot_sexo_pie <- renderPlotly({
     df <- est_datos(); req(nrow(df)>0, "sexo" %in% names(df))
@@ -4475,8 +4779,8 @@ server <- function(input, output, session) {
                   "Paternal (Probable)","Maternal (Probable)","Combined (Probable)","Unknown")
     df$her_f <- factor(her_base(df$Tipo_Herencia),
                        levels=c(her_levs, setdiff(unique(her_base(df$Tipo_Herencia)), her_levs)))
-    df$sexo_lbl <- ifelse(df$sexo=="M","Var\u00f3n \u2642",
-                          ifelse(df$sexo=="F","Mujer \u2640","Unknown"))
+    df$sexo_lbl <- ifelse(df$sexo=="M","Male \u2642",
+                          ifelse(df$sexo=="F","Female \u2640","Unknown"))
     conteo <- df |> group_by(sexo_lbl, her_f) |> summarise(n=n(), .groups="drop")
     fig <- plot_ly()
     for (h in her_levs) {
@@ -4522,8 +4826,8 @@ server <- function(input, output, session) {
   output$est_plot_herencia_sexo <- renderPlotly({
     df <- est_datos(); req(nrow(df)>0, "sexo" %in% names(df))
     df$her_limpia2 <- her_base(df$Tipo_Herencia)
-    df$sexo_lbl <- ifelse(df$sexo=="M","Var\u00f3n \u2642",
-                          ifelse(df$sexo=="F","Mujer \u2640","Unknown"))
+    df$sexo_lbl <- ifelse(df$sexo=="M","Male \u2642",
+                          ifelse(df$sexo=="F","Female \u2640","Unknown"))
     conteo <- df |>
       filter(!is.na(her_limpia2)) |>
       group_by(sexo_lbl, her_limpia2) |>
@@ -4538,7 +4842,7 @@ server <- function(input, output, session) {
     }
     layout(fig, barmode="stack",
            xaxis=list(title="", categoryorder="array",
-                      categoryarray=c("Var\u00f3n \u2642","Mujer \u2640","Unknown")),
+                      categoryarray=c("Male \u2642","Female \u2640","Unknown")),
            yaxis=list(title="N variants"),
            legend=list(orientation="h",y=-0.3,x=0,font=list(size=10)),
            margin=list(b=100,l=50,r=10,t=10), plot_bgcolor="#FAFAFA", paper_bgcolor="#FFFFFF")
@@ -4587,17 +4891,17 @@ server <- function(input, output, session) {
     umbral <- (input$comp_umbral %||% 50) / 100
     datos  <- rv$Results
     
-    todas <- switch(mod,
-                    "CNVs"  = datos$CNVs %||% data.frame(),
-                    "SVs"   = datos$SVs  %||% data.frame(),
-                    "Ambas" = bind_rows(
-                      if (!is.null(datos$CNVs)) mutate(datos$CNVs, Modalidad="CNV") else data.frame(),
-                      if (!is.null(datos$SVs))  mutate(datos$SVs,  Modalidad="SV")  else data.frame()
-                    )
+    All <- switch(mod,
+                  "CNVs"  = datos$CNVs %||% data.frame(),
+                  "SVs"   = datos$SVs  %||% data.frame(),
+                  "Both" = bind_rows(
+                    if (!is.null(datos$CNVs)) mutate(datos$CNVs, Modality="CNV") else data.frame(),
+                    if (!is.null(datos$SVs))  mutate(datos$SVs,  Modality="SV")  else data.frame()
+                  )
     )
-    if (nrow(todas) == 0) return(NULL)
+    if (nrow(All) == 0) return(NULL)
     
-    df_ab <- todas[todas$ID_Familia %in% c(fam_a, fam_b), , drop=FALSE]
+    df_ab <- All[All$ID_Familia %in% c(fam_a, fam_b), , drop=FALSE]
     if ("Annotation_mode" %in% names(df_ab))
       df_ab <- df_ab[!is.na(df_ab$Annotation_mode) & df_ab$Annotation_mode == "full", , drop=FALSE]
     if (nrow(df_ab) == 0) return(NULL)
@@ -4771,7 +5075,7 @@ server <- function(input, output, session) {
   output$tabla_comparador <- renderDT({
     cd <- comp_data()
     if (is.null(cd))
-      return(datatable(data.frame(Mensaje="Select two families and click Compare."),
+      return(datatable(data.frame(Message="Select two families and click Compare."),
                        options=list(dom="t"), rownames=FALSE))
     df  <- cd$df; fa <- cd$fam_a; fb <- cd$fam_b
     
@@ -4822,23 +5126,23 @@ server <- function(input, output, session) {
     end_ref <- suppressWarnings(as.numeric(fd$SV_end[1]))
     if (is.na(sta_ref) || is.na(end_ref)) return(NULL)
     
-    todas_df <- tryCatch({
+    All_df <- tryCatch({
       bind_rows(
-        if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modalidad="CNV") else data.frame(),
-        if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modalidad="SV")  else data.frame()
+        if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modality="CNV") else data.frame(),
+        if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modality="SV")  else data.frame()
       )
     }, error = function(e) data.frame())
-    if (nrow(todas_df) == 0) return(NULL)
-    if ("Annotation_mode" %in% names(todas_df))
-      todas_df <- todas_df[!is.na(todas_df$Annotation_mode) & todas_df$Annotation_mode == "full", , drop=FALSE]
+    if (nrow(All_df) == 0) return(NULL)
+    if ("Annotation_mode" %in% names(All_df))
+      All_df <- All_df[!is.na(All_df$Annotation_mode) & All_df$Annotation_mode == "full", , drop=FALSE]
     
-    chr_vec <- toupper(trimws(gsub("(?i)^chr", "", as.character(todas_df$SV_chrom), perl=TRUE)))
-    sta_vec <- suppressWarnings(as.numeric(todas_df$SV_start))
-    end_vec <- suppressWarnings(as.numeric(todas_df$SV_end))
+    chr_vec <- toupper(trimws(gsub("(?i)^chr", "", as.character(All_df$SV_chrom), perl=TRUE)))
+    sta_vec <- suppressWarnings(as.numeric(All_df$SV_start))
+    end_vec <- suppressWarnings(as.numeric(All_df$SV_end))
     margen  <- max((end_ref - sta_ref) * 0.25, 75000)
     mask    <- chr_vec == chr_ref & !is.na(sta_vec) & !is.na(end_vec) &
       sta_vec < (end_ref + margen) & end_vec > (sta_ref - margen)
-    df_loc  <- todas_df[mask, , drop=FALSE]
+    df_loc  <- All_df[mask, , drop=FALSE]
     if (nrow(df_loc) == 0) return(NULL)
     n_fams  <- length(unique(df_loc$ID_Familia))
     if (n_fams < 2) return(NULL)
@@ -4890,24 +5194,24 @@ server <- function(input, output, session) {
     req(!is.na(sta_ref), !is.na(end_ref))
     fam_ref <- as.character(fd$ID_Familia[1])
     
-    todas_df <- tryCatch({
+    All_df <- tryCatch({
       bind_rows(
-        if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modalidad="CNV") else data.frame(),
-        if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modalidad="SV")  else data.frame()
+        if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modality="CNV") else data.frame(),
+        if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modality="SV")  else data.frame()
       )
     }, error = function(e) data.frame())
-    req(nrow(todas_df) > 0)
-    if ("Annotation_mode" %in% names(todas_df))
-      todas_df <- todas_df[!is.na(todas_df$Annotation_mode) & todas_df$Annotation_mode == "full", , drop=FALSE]
+    req(nrow(All_df) > 0)
+    if ("Annotation_mode" %in% names(All_df))
+      All_df <- All_df[!is.na(All_df$Annotation_mode) & All_df$Annotation_mode == "full", , drop=FALSE]
     
-    chr_vec <- toupper(trimws(gsub("(?i)^chr", "", as.character(todas_df$SV_chrom), perl=TRUE)))
-    sta_vec <- suppressWarnings(as.numeric(todas_df$SV_start))
-    end_vec <- suppressWarnings(as.numeric(todas_df$SV_end))
+    chr_vec <- toupper(trimws(gsub("(?i)^chr", "", as.character(All_df$SV_chrom), perl=TRUE)))
+    sta_vec <- suppressWarnings(as.numeric(All_df$SV_start))
+    end_vec <- suppressWarnings(as.numeric(All_df$SV_end))
     margen  <- max((end_ref - sta_ref) * 0.25, 75000)
     
     mask    <- chr_vec == chr_ref & !is.na(sta_vec) & !is.na(end_vec) &
       sta_vec < (end_ref + margen) & end_vec > (sta_ref - margen)
-    df_loc  <- todas_df[mask, , drop=FALSE]
+    df_loc  <- All_df[mask, , drop=FALSE]
     req(nrow(df_loc) > 0)
     
     df_loc$her_b    <- her_base(df_loc$Tipo_Herencia)
@@ -5030,19 +5334,19 @@ server <- function(input, output, session) {
     click_end <- suppressWarnings(as.numeric(partes[3]))
     req(!is.na(click_sta), !is.na(click_end))
     
-    # Buscar la variante en todos los datos (sin filtros)
-    todas_df <- tryCatch({
+    # Buscar la variante en todos los datos (sin Filters)
+    All_df <- tryCatch({
       bind_rows(
-        if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modalidad="CNV") else data.frame(),
-        if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modalidad="SV")  else data.frame()
+        if (!is.null(rv$Results$CNVs)) mutate(rv$Results$CNVs, Modality="CNV") else data.frame(),
+        if (!is.null(rv$Results$SVs))  mutate(rv$Results$SVs,  Modality="SV")  else data.frame()
       )
     }, error = function(e) data.frame())
-    req(nrow(todas_df) > 0)
+    req(nrow(All_df) > 0)
     
-    sta_v  <- suppressWarnings(as.numeric(todas_df$SV_start))
-    end_v  <- suppressWarnings(as.numeric(todas_df$SV_end))
-    fam_v  <- as.character(todas_df$ID_Familia)
-    mode_v <- if ("Annotation_mode" %in% names(todas_df)) todas_df$Annotation_mode else rep("full", nrow(todas_df))
+    sta_v  <- suppressWarnings(as.numeric(All_df$SV_start))
+    end_v  <- suppressWarnings(as.numeric(All_df$SV_end))
+    fam_v  <- as.character(All_df$ID_Familia)
+    mode_v <- if ("Annotation_mode" %in% names(All_df)) All_df$Annotation_mode else rep("full", nrow(All_df))
     
     idx <- which(fam_v == click_fam &
                    !is.na(sta_v) & abs(sta_v - click_sta) < 2 &
@@ -5050,18 +5354,18 @@ server <- function(input, output, session) {
                    (is.na(mode_v) | mode_v == "full"))
     
     if (length(idx) == 0) {
-      showNotification(paste0("Variant from ", click_fam, " no encontrada (puede estar oculta por filtros activos)."),
+      showNotification(paste0("Variant from ", click_fam, " no encontrada (puede estar oculta por Filters activos)."),
                        type = "warning", duration = 4)
       return()
     }
     
     # Cargar datos en el panel de detalle
-    fila <- todas_df[idx[1], , drop = FALSE]
+    fila <- All_df[idx[1], , drop = FALSE]
     if ("._archivo_" %in% names(fila)) rv$fila_seleccionada <- fila$`._archivo_`[1]
     rv$fila_data <- fila
     
     # Guardar la seleccion pendiente: el observer reactivo de abajo la resolvera
-    # una vez que datos_filtrados() haya recomputado con los filtros correctos
+    # una vez que datos_filtrados() haya recomputado con los Filters correctos
     rv$pendiente_seleccion <- list(fam = click_fam, sta = click_sta, end = click_end)
     
     # Limpiar filtro de familia si la variante quedaria excluida
@@ -5081,7 +5385,7 @@ server <- function(input, output, session) {
   })
   
   # ---- Observer reactivo: selecciona la fila en la tabla cuando datos_filtrados()
-  #      ya incluye la variante pendiente (se dispara tras cualquier cambio de filtros) ----
+  #      ya incluye la variante pendiente (se dispara tras cualquier cambio de Filters) ----
   observe({
     ps <- rv$pendiente_seleccion
     req(!is.null(ps))
@@ -5383,7 +5687,7 @@ server <- function(input, output, session) {
   output$tabla_historial <- renderDT({
     hist <- rv$historial
     if (length(hist) == 0)
-      return(datatable(data.frame(Mensaje = "No actions recorded in this session."),
+      return(datatable(data.frame(Message = "No actions recorded in this session."),
                        options = list(dom = "t"), rownames = FALSE))
     df_h <- do.call(rbind, lapply(rev(hist), function(x) {
       data.frame(
@@ -5405,113 +5709,13 @@ server <- function(input, output, session) {
     showNotification("History cleared.", type = "warning", duration = 2)
   })
   
-  output$plot_ideograma <- renderPlotly({
-    df <- datos_filtrados()
-    req(nrow(df) > 0)
-    
-    if ("Annotation_mode" %in% names(df))
-      df <- df[!is.na(df$Annotation_mode) & df$Annotation_mode == "full", , drop = FALSE]
-    req(nrow(df) > 0)
-    
-    df$chr_clean <- toupper(trimws(gsub("(?i)^chr", "", as.character(df$SV_chrom), perl = TRUE)))
-    df$start_num <- suppressWarnings(as.numeric(df$SV_start))
-    df$end_num   <- suppressWarnings(as.numeric(df$SV_end))
-    df$her_base  <- her_base(df$Tipo_Herencia)
-    df$score_lbl <- ifelse(is.na(df$AnnotSV_ranking_score), "—", as.character(df$AnnotSV_ranking_score))
-    df <- df[df$chr_clean %in% CHR_ORDER & !is.na(df$start_num) & !is.na(df$end_num), , drop = FALSE]
-    req(nrow(df) > 0)
-    
-    # Vertical index per chromosome (Y axis)
-    chr_idx <- setNames(seq_along(CHR_ORDER), CHR_ORDER)
-    
-    fig <- plot_ly()
-    
-    # Barras de cromosomas (fondo gris)
-    for (chr in CHR_ORDER) {
-      if (!chr %in% names(CHR_LENGTHS)) next
-      fig <- add_trace(fig,
-                       type = "bar", orientation = "h",
-                       x = CHR_LENGTHS[chr], y = chr_idx[chr],
-                       base = 0,
-                       width = 0.55,
-                       marker = list(color = "#E0E0E0", line = list(color = "#BDBDBD", width = 0.8)),
-                       hoverinfo = "none", showlegend = FALSE
-      )
-    }
-    
-    # Variantes coloreadas por herencia
-    her_levels <- setdiff(unique(df$her_base), NA)
-    for (her in her_levels) {
-      df_h <- df[!is.na(df$her_base) & df$her_base == her, , drop = FALSE]
-      if (nrow(df_h) == 0) next
-      col <- HER_COLORS[her]; if (is.na(col)) col <- "#AAAAAA"
-      
-      # Minimum visible width: 2% of chromosome to not lose small variants
-      widths <- pmax(df_h$end_num - df_h$start_num,
-                     CHR_LENGTHS[df_h$chr_clean] * 0.015, na.rm = TRUE)
-      
-      fig <- add_trace(fig,
-                       type = "bar", orientation = "h",
-                       x    = widths,
-                       y    = chr_idx[df_h$chr_clean],
-                       base = df_h$start_num,
-                       width = 0.55,
-                       marker = list(
-                         color = paste0(col, "BB"),
-                         line  = list(color = col, width = 1.2)
-                       ),
-                       name          = her,
-                       legendgroup   = her,
-                       showlegend    = TRUE,
-                       text = paste0(
-                         "<b>Familia:</b> ",   df_h$ID_Familia,   "<br>",
-                         "<b>Region:</b> chr", df_h$chr_clean, ":", format(df_h$start_num, big.mark=".", scientific=FALSE),
-                         "–", format(df_h$end_num, big.mark=".", scientific=FALSE), "<br>",
-                         "<b>Tipo:</b> ",      df_h$SV_type,       "<br>",
-                         "<b>Inheritance:</b> ",  her,                 "<br>",
-                         "<b>Score:</b> ",     df_h$score_lbl
-                       ),
-                       hovertemplate = "%{text}<extra></extra>"
-      )
-    }
-    
-    layout(fig,
-           barmode = "overlay",
-           xaxis = list(
-             title      = "Genomic position (bp)",
-             tickformat = ",.0f",
-             showgrid   = TRUE,
-             gridcolor  = "#F0F0F0"
-           ),
-           yaxis = list(
-             title      = "",
-             tickvals   = seq_along(CHR_ORDER),
-             ticktext   = paste0("chr", CHR_ORDER),
-             autorange  = "reversed",
-             tickfont   = list(size = 11)
-           ),
-           legend = list(
-             title       = list(text = "<b>Inheritance</b>"),
-             orientation = "h",
-             y           = -0.12,
-             x           = 0,
-             font        = list(size = 11)
-           ),
-           margin  = list(l = 65, r = 20, t = 15, b = 70),
-           plot_bgcolor  = "#FAFAFA",
-           paper_bgcolor = "#FFFFFF",
-           height  = 720
-    )
-  })
-  
-  
   # =============================================================================
   # STATISTICAL TESTS — server logic
   # =============================================================================
   
   # Reactive: clean dataset for tests (without Results tab filters)
   test_datos_base <- reactive({
-    datos <- rv$Results
+    datos <- rv$resultados
     if (is.null(datos$CNVs) && is.null(datos$SVs)) return(data.frame())
     cnv <- if (!is.null(datos$CNVs)) mutate(datos$CNVs, Modalidad="CNV") else data.frame()
     sv  <- if (!is.null(datos$SVs))  mutate(datos$SVs,  Modalidad="SV")  else data.frame()
@@ -5528,8 +5732,8 @@ server <- function(input, output, session) {
     sv_up          <- toupper(as.character(df$SV_type))
     df$tipo_agrup  <- ifelse(grepl("DEL|LOSS",sv_up),"DEL",
                              ifelse(grepl("DUP|GAIN",sv_up),"DUP","OTHER"))
-    df$en_sfari    <- if ("En_Panel_Genes" %in% names(df))
-      es_sfari_col(df$En_Panel_Genes) else FALSE
+    df$en_sfari    <- if ("En_Panel_SFARI" %in% names(df))
+      es_sfari_col(df$En_Panel_SFARI) else FALSE
     # Numeric encodings of categorical variables (for numeric tests)
     df$her_limpia_num  <- as.integer(factor(df$her_limpia))
     df$tipo_agrup_num  <- as.integer(factor(df$tipo_agrup, levels=c("DEL","DUP","OTHER")))
@@ -5539,30 +5743,30 @@ server <- function(input, output, session) {
     df
   })
   
-  # Variables continuas disponibles
+  # Available continuous variables
   VARS_CONTINUAS <- c(
-    "Score AnnotSV"   = "score_num",
-    "Size (Kb)"     = "tamano_kb"
+    "AnnotSV Score"   = "score_num",
+    "Size (Kb)"       = "tamano_kb"
   )
   # Available categorical variables
   VARS_CATEG <- c(
     "Inheritance"        = "her_limpia",
-    "Variant type"   = "tipo_agrup",
-    "Chromosome"       = "chr_clean",
-    "Modalidad (CNV/SV)" = "Modality",
-    "SFARI gene"       = "en_sfari"
+    "Variant type"       = "tipo_agrup",
+    "Chromosome"         = "chr_clean",
+    "Modality (CNV/SV)"  = "Modalidad",
+    "SFARI gene"         = "en_sfari"
   )
   # Categorical variables encoded as integers (for numeric tests)
   VARS_CATEG_AS_NUM <- c(
-    "Inheritance (\u2192 count)"          = "her_limpia_num",
-    "Tipo variante (\u2192 n\u00ba)"     = "tipo_agrup_num",
-    "Chromosome (\u2192 count)"         = "chr_clean_num",
-    "Modalidad (\u2192 n\u00ba)"         = "Modalidad_num",
-    "Gen SFARI (\u2192 n\u00ba)"         = "en_sfari_num"
+    "Inheritance (\u2192 n\u00ba)"         = "her_limpia_num",
+    "Variant type (\u2192 n\u00ba)"        = "tipo_agrup_num",
+    "Chromosome (\u2192 n\u00ba)"          = "chr_clean_num",
+    "Modality (\u2192 n\u00ba)"            = "Modalidad_num",
+    "SFARI gene (\u2192 n\u00ba)"          = "en_sfari_num"
   )
   
   # =============================================================================
-  # WIZARD GUIADO — tarjetas de pregunta en lenguaje natural
+  # GUIDED WIZARD — natural-language question cards
   # =============================================================================
   
   # Wizard question definitions (ordered by frequency of use)
@@ -5570,75 +5774,75 @@ server <- function(input, output, session) {
     list(
       id     = "wiz_wilcoxon",  tipo  = "wilcoxon",
       icono  = "\U0001f4ca",   color = "#2C6FAC",
-      titulo = "\u00bfDifieren dos grupos?",
-      desc   = "Compara Score o Tama\u00f1o entre dos tipos de herencia, DEL vs DUP, SFARI vs no\u2026",
-      tip    = "El m\u00e1s usado en estudios de CNV"
+      titulo = "Do two groups differ?",
+      desc   = "Compare Score or Size between two inheritance types, DEL vs DUP, SFARI vs non\u2026",
+      tip    = "Most commonly used in CNV studies"
     ),
     list(
       id     = "wiz_kruskal",   tipo  = "kruskal",
       icono  = "\U0001f4ca",   color = "#5B6CBD",
-      titulo = "\u00bfDifieren varios grupos?",
-      desc   = "Compare Score or Size across all inheritance types at once",
+      titulo = "Do multiple groups differ?",
+      desc   = "Compare Score or Size across all inheritance types simultaneously",
       tip    = "Generalises Wilcoxon to 3+ groups"
     ),
     list(
       id     = "wiz_chisq",     tipo  = "chisq",
       icono  = "\U0001f517",   color = "#27AE60",
-      titulo = "\u00bfSe asocian dos variables categ\u00f3ricas?",
-      desc   = "Ej: \u00bfla herencia y el tipo de variante (DEL/DUP) van juntos? \u00bfSFARI y herencia?",
-      tip    = "Chi\u00b2 si n grande \u00b7 Fisher si hay celdas peque\u00f1as"
+      titulo = "Are two categorical variables associated?",
+      desc   = "E.g.: does inheritance correlate with variant type (DEL/DUP)? SFARI and inheritance?",
+      tip    = "Chi\u00b2 for large n \u00b7 Fisher when cells are small"
     ),
     list(
       id     = "wiz_spearman",  tipo  = "spearman",
       icono  = "\U0001f4c8",   color = "#E67E22",
-      titulo = "\u00bfCorrelacionan dos variables num\u00e9ricas?",
-      desc   = "Ej: \u00bflas variantes m\u00e1s grandes tienen mayor Score AnnotSV?",
-      tip    = "No asume normalidad \u00b7 robusto a valores extremos"
+      titulo = "Do two numeric variables correlate?",
+      desc   = "E.g.: do larger variants have a higher AnnotSV Score?",
+      tip    = "Does not assume normality \u00b7 robust to outliers"
     ),
     list(
       id     = "wiz_burden",    tipo  = "burden",
       icono  = "\U0001f9ec",   color = "#8E44AD",
-      titulo = "\u00bfTienen mayor carga gen\u00f3mica ciertos grupos?",
-      desc   = "Compara el n\u00ba de variantes por familia: SFARI vs no, De novo vs heredada\u2026",
-      tip    = "Est\u00e1ndar en estudios de CNV en TEA"
+      titulo = "Do certain groups have a higher genomic burden?",
+      desc   = "Compare the number of variants per family: SFARI vs non, De novo vs inherited\u2026",
+      tip    = "Standard in CNV burden studies in ASD"
     ),
     list(
       id     = "wiz_prop_binom", tipo = "prop_binom",
       icono  = "\U0001f3af",   color = "#CC0000",
-      titulo = "\u00bfLa proporci\u00f3n observada es la esperada?",
-      desc   = "Ej: \u00bfla tasa de De novo (~15-20\u0025 en TEA) concuerda con esta cohorte?",
+      titulo = "Is the observed proportion the expected one?",
+      desc   = "E.g.: does the De novo rate (~15-20\u0025 in ASD) match this cohort?",
       tip    = "Tests against a reference value"
     ),
     list(
       id     = "wiz_shapiro",   tipo  = "shapiro",
       icono  = "\U0001f4d0",   color = "#7F8C8D",
-      titulo = "\u00bfSiguen los datos una distribuci\u00f3n normal?",
-      desc   = "Paso previo para saber si usar tests param\u00e9tricos (t-test) o no param\u00e9tricos (Wilcoxon)",
-      tip    = "Always use before Pearson or ANOVA"
+      titulo = "Do the data follow a normal distribution?",
+      desc   = "Prior step to decide whether to use parametric (t-test) or non-parametric (Wilcoxon) tests",
+      tip    = "Always run before Pearson or ANOVA"
     )
   )
   
   output$ui_test_wizard_cards <- renderUI({
-    if (!isTRUE(input$test_modo_ui == "guiado")) return(NULL)
+    if (!isTRUE(input$test_modo_ui == "guided")) return(NULL)
     df <- test_datos_base()
     
     if (nrow(df) == 0)
       return(div(class = "alert alert-warning small p-2 mt-1",
-                 bsicons::bs_icon("exclamation-triangle"), " Carga Results primero."))
+                 bsicons::bs_icon("exclamation-triangle"), " Load results first."))
     
     tipo_actual <- isolate(input$test_tipo) %||% "wilcoxon"
     n_vars      <- nrow(df)
     
     tagList(
-      # ── Cabecera ──────────────────────────────────────────────────────────
+      # ── Header ───────────────────────────────────────────────────────────
       div(class = "mb-2",
           tags$p(class = "fw-bold mb-1", style = "font-size:0.88em; color:#2C6FAC;",
-                 "\U0001f9ed \u00bfQu\u00e9 quieres investigar?"),
+                 "\U0001f9ed What do you want to investigate?"),
           tags$p(class = "text-muted mb-0", style = "font-size:0.78em;",
-                 paste0("Datos disponibles: ", n_vars, " variantes"))
+                 paste0("Available data: ", n_vars, " variants"))
       ),
       
-      # ── Tarjetas de pregunta ──────────────────────────────────────────────
+      # ── Question cards ───────────────────────────────────────────────────
       lapply(WIZARD_PREGUNTAS, function(q) {
         activo <- identical(tipo_actual, q$tipo)
         div(
@@ -5680,38 +5884,38 @@ server <- function(input, output, session) {
         )
       }),
       
-      # ── Enlace a modo experto ─────────────────────────────────────────────
+      # ── Link to expert mode ───────────────────────────────────────────────
       div(class = "mt-2 text-center",
           tags$small(
             class = "text-muted",
-            "Tests avanzados (Fisher, KS, Pearson\u2026): ",
+            "Advanced tests (Fisher, KS, Pearson\u2026): ",
             tags$a(
               href    = "#",
               style   = "color:#2C6FAC; font-size:0.85em;",
               onclick = paste0(
-                "Shiny.setInputValue(\'test_modo_ui_js\',\'experto\',",
+                "Shiny.setInputValue(\'test_modo_ui_js\',\'expert\',",
                 "{priority:\'event\'});return false;"
               ),
-              "cambiar a modo experto"
+              "switch to expert mode"
             )
           )
       )
     )
   })
   
-  # ── Observer: click en tarjeta del wizard ─────────────────────────────────
+  # ── Observer: click on wizard card ───────────────────────────────────────────
   observeEvent(input$wiz_sel, {
     req(input$wiz_sel)
     updateSelectInput(session, "test_tipo", selected = input$wiz_sel)
   }, ignoreNULL = TRUE)
   
-  # ── Observer: enlace "modo experto" desde el wizard ───────────────────────
+  # ── Observer: "expert mode" link from wizard ─────────────────────────────────
   observeEvent(input$test_modo_ui_js, {
-    req(input$test_modo_ui_js == "experto")
-    updateRadioButtons(session, "test_modo_ui", selected = "experto")
+    req(input$test_modo_ui_js == "expert")
+    updateRadioButtons(session, "test_modo_ui", selected = "expert")
   }, ignoreNULL = TRUE)
   
-  # ── Dynamic parameter UI based on selected test ────────────────────────
+  # ── Dynamic parameter UI depending on selected test ──────────────────────────
   output$ui_test_params <- renderUI({
     tipo <- input$test_tipo
     df   <- test_datos_base()
@@ -5741,11 +5945,11 @@ server <- function(input, output, session) {
       tagList(
         div(class="mb-2",
             checkboxInput("test_categ_como_num",
-                          tags$span(bsicons::bs_icon("123"), " Include factors as numerics"),
+                          tags$span(bsicons::bs_icon("123"), " Include categoricals as numeric"),
                           value=isTRUE(input$test_categ_como_num))),
         selectInput("test_var_y", "Numeric variable",
                     choices=vars_num, selected=isolate(input$test_var_y) %||% "score_num", width="100%"),
-        selectInput("test_var_grupo", "Variable de grupo",
+        selectInput("test_var_grupo", "Group variable",
                     choices=VARS_CATEG, selected="her_limpia", width="100%"),
         uiOutput("ui_test_grupo_ab")
       )
@@ -5753,13 +5957,13 @@ server <- function(input, output, session) {
       tagList(
         div(class="mb-2",
             checkboxInput("test_categ_como_num",
-                          tags$span(bsicons::bs_icon("123"), " Include factors as numerics"),
+                          tags$span(bsicons::bs_icon("123"), " Include categoricals as numeric"),
                           value=isTRUE(input$test_categ_como_num))),
         selectInput("test_var_y", "Numeric variable",
                     choices=vars_num, selected=isolate(input$test_var_y) %||% "score_num", width="100%"),
-        selectInput("test_var_grupo", "Variable de grupo",
+        selectInput("test_var_grupo", "Group variable",
                     choices=VARS_CATEG, selected="her_limpia", width="100%"),
-        checkboxGroupInput("test_grupos_multi", "Grupos a incluir",
+        checkboxGroupInput("test_grupos_multi", "Groups to include",
                            choices  = her_vals,
                            selected = her_vals,
                            inline   = FALSE
@@ -5767,9 +5971,9 @@ server <- function(input, output, session) {
       )
     } else if (tipo %in% c("chisq","fisher")) {
       tagList(
-        selectInput("test_var_fila", "Variable filas",
+        selectInput("test_var_fila", "Row variable",
                     choices=VARS_CATEG, selected="her_limpia", width="100%"),
-        selectInput("test_var_col", "Variable columnas",
+        selectInput("test_var_col", "Column variable",
                     choices=VARS_CATEG[VARS_CATEG != "her_limpia"], selected="tipo_agrup", width="100%"),
         numericInput("test_chisq_minexp", "Minimum expected frequency (cell filter)",
                      value=5, min=1, step=1, width="100%")
@@ -5778,7 +5982,7 @@ server <- function(input, output, session) {
       tagList(
         div(class="mb-2",
             checkboxInput("test_categ_como_num",
-                          tags$span(bsicons::bs_icon("123"), " Include factors as numerics"),
+                          tags$span(bsicons::bs_icon("123"), " Include categoricals as numeric"),
                           value=isTRUE(input$test_categ_como_num))),
         selectInput("test_var_x", "Variable X",
                     choices=vars_num, selected=isolate(input$test_var_x) %||% "tamano_kb", width="100%"),
@@ -5793,14 +5997,14 @@ server <- function(input, output, session) {
       tagList(
         div(class="mb-2",
             checkboxInput("test_categ_como_num",
-                          tags$span(bsicons::bs_icon("123"), " Include factors as numerics"),
+                          tags$span(bsicons::bs_icon("123"), " Include categoricals as numeric"),
                           value=isTRUE(input$test_categ_como_num))),
-        selectInput("test_var_shap", "Variable a testear",
+        selectInput("test_var_shap", "Variable to test",
                     choices=vars_num, selected=isolate(input$test_var_shap) %||% "score_num", width="100%"),
-        selectInput("test_shap_grupo_var", "Separar por grupo (opcional)",
-                    choices=c("Ninguno"="ninguno", VARS_CATEG), selected="ninguno", width="100%"),
+        selectInput("test_shap_grupo_var", "Split by group (optional)",
+                    choices=c("None"="none", VARS_CATEG), selected="none", width="100%"),
         tags$small(class="text-muted",
-                   "Shapiro-Wilk requires n between 3 and 5000. Groups with n out of range are omitted.")
+                   "Shapiro-Wilk requires n between 3 and 5000. Groups outside this range are skipped.")
       )
     } else if (tipo == "prop_binom") {
       tagList(
@@ -5823,16 +6027,16 @@ server <- function(input, output, session) {
     }
   })
   
-  # Sub-UI: selection of groups A and B for 2-group tests
+  # Sub-UI: group A / B selection for 2-group tests
   output$ui_test_grupo_ab <- renderUI({
     grp_var <- input$test_var_grupo
     req(!is.null(grp_var))
     df <- test_datos_base(); req(nrow(df) > 0)
     vals <- sort(unique(na.omit(as.character(df[[grp_var]]))))
     tagList(
-      selectInput("test_grupo_a", "Grupo A",
+      selectInput("test_grupo_a", "Group A",
                   choices=vals, selected=vals[1], width="100%"),
-      selectInput("test_grupo_b", "Grupo B",
+      selectInput("test_grupo_b", "Group B",
                   choices=vals, selected=if(length(vals)>=2) vals[2] else vals[1], width="100%")
     )
   })
@@ -5846,96 +6050,96 @@ server <- function(input, output, session) {
                 choices=vals, selected=vals[1], width="100%")
   })
   
-  # Sub-UI: niveles para burden
+  # Sub-UI: levels for burden
   output$ui_test_burden_niveles <- renderUI({
     var <- input$test_burden_grupo; req(!is.null(var))
     df  <- test_datos_base(); req(nrow(df) > 0)
     vals <- sort(unique(na.omit(as.character(df[[var]]))))
     tagList(
-      selectInput("test_burden_a", "Grupo A", choices=vals, selected=vals[1], width="100%"),
-      selectInput("test_burden_b", "Grupo B",
+      selectInput("test_burden_a", "Group A", choices=vals, selected=vals[1], width="100%"),
+      selectInput("test_burden_b", "Group B",
                   choices=vals, selected=if(length(vals)>=2) vals[2] else vals[1], width="100%")
     )
   })
   
-  # ── Ayuda contextual por test ─────────────────────────────────────────────────
+  # ── Contextual help by test ───────────────────────────────────────────────────
   AYUDAS <- list(
     wilcoxon  = list(
-      nombre = "Wilcoxon-Mann-Whitney test",
-      cuando = "Compares medians of a continuous variable between two independent groups without assuming normality.",
+      nombre = "Wilcoxon-Mann-Whitney Test",
+      cuando = "Compares the medians of a continuous variable between two independent groups without assuming normality.",
       h0     = "H0: The distributions of both groups are identical (equal medians).",
-      uso    = "Ideal for comparing scores or sizes across inheritances (De novo vs Paternal, DEL vs DUP...).",
-      ref    = "Mann & Whitney (1947) · Non-parametric · Alternative to Student's t-test."
+      uso    = "Ideal for comparing scores or sizes between inheritances (De novo vs Paternal, DEL vs DUP...).",
+      ref    = "Mann & Whitney (1947) \u00b7 Non-parametric \u00b7 Alternative to Student's t-test."
     ),
     kruskal   = list(
-      nombre = "Kruskal-Wallis test",
+      nombre = "Kruskal-Wallis Test",
       cuando = "Generalisation of Wilcoxon for 3 or more independent groups.",
       h0     = "H0: The distributions of all groups are identical.",
       uso    = "Compare scores across all inheritance types simultaneously.",
-      ref    = "Kruskal & Wallis (1952) · Non-parametric · Alternative to one-way ANOVA."
+      ref    = "Kruskal & Wallis (1952) \u00b7 Non-parametric \u00b7 Alternative to one-way ANOVA."
     ),
     chisq     = list(
-      nombre = "Chi-squared independence test",
+      nombre = "Chi-squared test of independence",
       cuando = "Detects association between two categorical variables with large samples.",
       h0     = "H0: The two variables are independent (no association).",
       uso    = "Associate inheritance type with variant type (DEL/DUP), chromosome, etc.",
-      ref    = "Pearson (1900) · Requires expected frequencies >= 5 per cell."
+      ref    = "Pearson (1900) \u00b7 Requires expected frequencies >= 5 per cell."
     ),
     fisher    = list(
-      nombre = "Fisher's exact test",
+      nombre = "Fisher's Exact Test",
       cuando = "Association between two binary variables or tables with small cells (n < 20).",
       h0     = "H0: The two variables are independent.",
-      uso    = "More precise than chi-squared when there are cells with few observations.",
-      ref    = "Fisher (1922) · Exact (not asymptotic) · Recommended for small sample sizes."
+      uso    = "More precise than chi-squared when cells have few observations.",
+      ref    = "Fisher (1922) \u00b7 Exact (not asymptotic) \u00b7 Recommended for small sample sizes."
     ),
     spearman  = list(
-      nombre = "Spearman correlation",
+      nombre = "Spearman Correlation",
       cuando = "Measures the monotonic association between two continuous variables without assuming normality.",
       h0     = "H0: rho = 0 (no monotonic correlation).",
       uso    = "Correlation between variant size and AnnotSV score.",
-      ref    = "Spearman (1904) · Non-parametric · Robust to outliers."
+      ref    = "Spearman (1904) \u00b7 Non-parametric \u00b7 Robust to outliers."
     ),
     pearson   = list(
-      nombre = "Pearson correlation",
+      nombre = "Pearson Correlation",
       cuando = "Measures the linear association between two normally distributed continuous variables.",
       h0     = "H0: r = 0 (no linear correlation).",
       uso    = "Use only if both variables are approximately normal (verify with Shapiro-Wilk).",
-      ref    = "Pearson (1895) · Parametric · Sensitive to outliers."
+      ref    = "Pearson (1895) \u00b7 Parametric \u00b7 Sensitive to outliers."
     ),
     shapiro   = list(
-      nombre = "Shapiro-Wilk normality test",
+      nombre = "Shapiro-Wilk Normality Test",
       cuando = "Tests whether a sample comes from a normal distribution.",
       h0     = "H0: The data follow a normal distribution.",
-      uso    = "Preliminary step to decide between parametric (t-test, ANOVA) and non-parametric (Wilcoxon, Kruskal) tests.",
-      ref    = "Shapiro & Wilk (1965) · Powerful for n < 50 · For large n, use QQ-plot."
+      uso    = "Prior step to decide between parametric (t-test, ANOVA) and non-parametric (Wilcoxon, Kruskal) tests.",
+      ref    = "Shapiro & Wilk (1965) \u00b7 Powerful for n < 50 \u00b7 For large n, use QQ-plot."
     ),
     ks        = list(
-      nombre = "Kolmogorov-Smirnov test (2 samples)",
+      nombre = "Kolmogorov-Smirnov Test (2 samples)",
       cuando = "Compares the full distribution of two samples (not just the median).",
       h0     = "H0: Both samples come from the same continuous distribution.",
-      uso    = "Detect whether DEL and DUP have different size or score distributions in their overall shape.",
-      ref    = "Smirnov (1948) · Sensitive to differences in shape, mean and variance."
+      uso    = "Detect whether DEL and DUP have differently shaped size or score distributions.",
+      ref    = "Smirnov (1948) \u00b7 Sensitive to differences in shape, mean and variance."
     ),
     prop_binom = list(
-      nombre = "Binomial proportions test",
+      nombre = "Binomial Proportion Test",
       cuando = "Tests whether the observed proportion of a category differs from a reference value.",
       h0     = "H0: The observed proportion equals p0 (theoretical expected value).",
-      uso    = "Example: Is the de novo variant rate (~15-20% expected in ASD) different in this cohort?",
-      ref    = "Exact binomial test · Does not assume normality · Valid for any n."
+      uso    = "Example: is the de novo variant rate (~15-20% expected in ASD) different in this cohort?",
+      ref    = "Exact binomial test \u00b7 Does not assume normality \u00b7 Valid for any n."
     ),
     prop2     = list(
-      nombre = "Proportions comparison (2 groups)",
+      nombre = "Two-group Proportion Comparison",
       cuando = "Tests whether two groups have the same proportion of a characteristic.",
-      h0     = "H0: The event proportion is equal in both groups.",
-      uso    = "Example: Do males have a higher de novo variant rate than females?",
-      ref    = "R's prop.test (Yates correction) · Equivalent to 2×2 chi-squared."
+      h0     = "H0: The proportion of the event is equal in both groups.",
+      uso    = "Example: do males have a higher de novo variant rate than females?",
+      ref    = "R prop.test (Yates correction) \u00b7 Equivalent to 2x2 chi-squared."
     ),
     burden    = list(
-      nombre = "Genomic burden analysis",
+      nombre = "Genomic Burden Analysis",
       cuando = "Compares the number of variants per family between two subgroups.",
       h0     = "H0: The mean variant burden is equal in both groups.",
-      uso    = "Example: Do families with de novo variants have more variants overall? SFARI vs non-SFARI?",
-      ref    = "Wilcoxon on per-individual counts · Robust · Standard in CNV studies in ASD."
+      uso    = "Example: do families with a de novo variant have more variants overall? SFARI vs non-SFARI?",
+      ref    = "Wilcoxon on per-individual counts \u00b7 Robust \u00b7 Standard in CNV burden studies in ASD."
     )
   )
   
@@ -5947,11 +6151,11 @@ server <- function(input, output, session) {
     guia_p <- div(
       class = "mt-2 p-2 rounded",
       class = "dm-warn-panel rounded mt-2 p-2", style="font-size:0.80em; border:1px solid;",
-      tags$b(class="dm-dark-txt", "\U0001f4d6 C\u00f3mo interpretar el p-valor:"),
+      tags$b(class="dm-dark-txt", "\U0001f4d6 How to interpret the p-value:"),
       div(class="mt-1 d-flex flex-column gap-1",
           div(class="d-flex align-items-center gap-2",
               tags$span(class="badge bg-danger", "p < 0.001"),
-              tags$span("Very significant difference (***)")),
+              tags$span("Highly significant difference (***)")),
           div(class="d-flex align-items-center gap-2",
               tags$span(class="badge bg-warning text-dark", "p < 0.01"),
               tags$span("Significant difference (**)")),
@@ -5963,7 +6167,7 @@ server <- function(input, output, session) {
               tags$span("Insufficient evidence of difference (ns)"))
       ),
       div(class="mt-1 text-muted", style="font-size:0.9em;",
-          "\u26a0\ufe0f Un p-valor significativo indica que la diferencia observada no es atribuible al azar,",
+          "\u26a0\ufe0f A significant p-value indicates the observed difference is not attributable to chance,",
           " but does not imply causality or clinical relevance.")
     )
     
@@ -5980,7 +6184,7 @@ server <- function(input, output, session) {
             tags$b("H\u2080: "), tags$span(class="dm-muted-txt", ay$h0)),
         div(class="p-1 rounded",
             class="dm-uso-panel rounded p-1", style="border-left:3px solid;",
-            tags$b("\U0001f4a1 T\u00edpico: "), tags$span(class="dm-muted-txt", ay$uso)),
+            tags$b("\U0001f4a1 Typical use: "), tags$span(class="dm-muted-txt", ay$uso)),
         br(),
         tags$i(class="text-muted", style="font-size:0.9em;", ay$ref)
       ),
@@ -5988,8 +6192,8 @@ server <- function(input, output, session) {
     )
   })
   
-  # ── Reactive: runs test when button is pressed ──────────────────────────────
-  test_resultado <- eventReactive(input$btn_ejecutar_test, {
+  # ── Reactive: runs the test when the button is pressed ───────────────────────
+  test_resultado <- eventReactive(input$btn_Execute_test, {
     tipo <- input$test_tipo
     df   <- test_datos_base()
     if (nrow(df) == 0) return(list(error="No data loaded."))
@@ -6023,7 +6227,7 @@ server <- function(input, output, session) {
         if (tipo == "chisq") {
           res <- chisq.test(tbl)
         } else {
-          if (prod(dim(tbl)) > 100) return(list(error="Table too large for exact Fisher test. Use Chi-squared."))
+          if (prod(dim(tbl)) > 100) return(list(error="Table too large for exact Fisher. Use Chi-squared."))
           res <- fisher.test(tbl, simulate.p.value=(prod(dim(tbl))>4))
         }
         list(tipo=tipo, test=res, tabla=tbl, v1=v1, v2=v2)
@@ -6042,10 +6246,10 @@ server <- function(input, output, session) {
       } else if (tipo == "shapiro") {
         var  <- input$test_var_shap
         grp_var <- input$test_shap_grupo_var
-        if (grp_var == "ninguno") {
+        if (grp_var == "none") {
           vals <- df[[var]][is.finite(df[[var]])]
           if (length(vals) < 3 || length(vals) > 5000)
-            return(list(error=paste0("n=",length(vals)," out of range [3,5000].")))
+            return(list(error=paste0("n=",length(vals)," outside range [3,5000].")))
           res <- shapiro.test(vals)
           list(tipo=tipo, tests=list(list(grp="All",res=res,vals=vals)), var=var)
         } else {
@@ -6110,7 +6314,7 @@ server <- function(input, output, session) {
              grp_var=grp_var)
       }
       
-    }, error = function(e) list(error=paste("Error running the test:", e$message)))
+    }, error = function(e) list(error=paste("Error running test:", e$message)))
   })
   
   # ── p-value formatting with stars ────────────────────────────────────────────
@@ -6124,10 +6328,10 @@ server <- function(input, output, session) {
     if (p < 0.001) "bg-danger" else if (p < 0.01) "bg-warning text-dark" else if (p < 0.05) "bg-primary" else "bg-secondary"
   }
   
-  # ── Result rendering ─────────────────────────────────────────────────
+  # ── Result rendering ──────────────────────────────────────────────────────────
   output$ui_test_resultado <- renderUI({
     res <- test_resultado()
-    if (is.null(res)) return(div(class="alert alert-info", "Configure the test and click ▶ Run."))
+    if (is.null(res)) return(div(class="alert alert-info", "Configure the test and press \u25b6 Run."))
     if (!is.null(res$error)) return(div(class="alert alert-danger", res$error))
     
     tipo <- res$tipo
@@ -6145,33 +6349,33 @@ server <- function(input, output, session) {
       ga <- res$grupos$A$nombre; gb <- res$grupos$B$nombre
       med_a <- round(median(res$grupos$A$vals, na.rm=TRUE), 3)
       med_b <- round(median(res$grupos$B$vals, na.rm=TRUE), 3)
-      efecto <- if (!is.null(tst$estimate)) round(as.numeric(tst$estimate), 3) else "—"
+      efecto <- if (!is.null(tst$estimate)) round(as.numeric(tst$estimate), 3) else "\u2014"
       ci_txt <- if (!is.null(tst$conf.int))
-        paste0("[", round(tst$conf.int[1],3), ", ", round(tst$conf.int[2],3), "]") else "—"
+        paste0("[", round(tst$conf.int[1],3), ", ", round(tst$conf.int[2],3), "]") else "\u2014"
       tagList(
         card(card_header(class="bg-success text-white fw-bold",
                          bsicons::bs_icon("check-circle"), " Results"),
              card_body(
                layout_columns(col_widths=c(3,3,3,3),
                               tarjeta("p-value", fmt_p(p), semaforo_p(p)),
-                              tarjeta("W statistic", round(tst$statistic,2), "bg-dark"),
-                              tarjeta(paste0("Mediana ", ga), med_a, "bg-info"),
-                              tarjeta(paste0("Mediana ", gb), med_b, "bg-info")
+                              tarjeta("Statistic W", round(tst$statistic,2), "bg-dark"),
+                              tarjeta(paste0("Median ", ga), med_a, "bg-info"),
+                              tarjeta(paste0("Median ", gb), med_b, "bg-info")
                ),
                div(class="dm-result-panel rounded border p-3 mt-3",
                    tags$b("Location difference estimator: "), efecto, br(),
-                   tags$b("95% confidence interval: "), ci_txt, br(), br(),
+                   tags$b("95% Confidence interval: "), ci_txt, br(), br(),
                    tags$b("Interpretation: "),
                    if (p < 0.05)
                      tags$span(style="color:#CC0000; font-weight:600;",
                                paste0("H0 rejected (p=", formatC(p,digits=3,format="g"), "). ",
-                                      "Statistically significant differences between '",
-                                      ga, "' y '", gb, "'."))
+                                      "Statistically significant differences exist between '",
+                                      ga, "' and '", gb, "'."))
                    else
                      tags$span(class="dm-muted-txt",
                                paste0("H0 not rejected (p=", formatC(p,digits=3,format="g"), "). ",
                                       "Insufficient evidence of differences between '",
-                                      ga, "' y '", gb, "'."))
+                                      ga, "' and '", gb, "'."))
                )
              )
         )
@@ -6189,7 +6393,7 @@ server <- function(input, output, session) {
              card_body(
                layout_columns(col_widths=c(4,4,4),
                               tarjeta("p-value", fmt_p(p), semaforo_p(p)),
-                              tarjeta("Chi² (H)", round(tst$statistic,2), "bg-dark"),
+                              tarjeta("Chi\u00b2 (H)", round(tst$statistic,2), "bg-dark"),
                               tarjeta("d.f.", tst$parameter, "bg-secondary")
                ),
                div(class="dm-result-panel rounded border p-3 mt-3",
@@ -6199,11 +6403,11 @@ server <- function(input, output, session) {
                    if (p < 0.05)
                      tags$span(style="color:#CC0000; font-weight:600;",
                                paste0("H0 rejected. At least one group differs significantly (p=",
-                                      formatC(p,digits=3,format="g"), "). Considera post-hoc por pares (Wilcoxon + Bonferroni)."))
+                                      formatC(p,digits=3,format="g"), "). Consider pairwise post-hoc tests (Wilcoxon + Bonferroni)."))
                    else
                      tags$span(class="dm-muted-txt",
                                paste0("H0 not rejected (p=", formatC(p,digits=3,format="g"),
-                                      "). No hay diferencias significativas entre los grupos."))
+                                      "). No significant differences between groups."))
                )
              )
         )
@@ -6217,11 +6421,11 @@ server <- function(input, output, session) {
              card_body(
                layout_columns(col_widths=c(4,4,4),
                               tarjeta("p-value", fmt_p(p), semaforo_p(p)),
-                              tarjeta(if(tipo=="chisq") "Chi² stat" else "Estimated OR",
+                              tarjeta(if(tipo=="chisq") "Chi\u00b2 stat" else "Estimated OR",
                                       if(tipo=="chisq") round(tst$statistic,3)
-                                      else if(!is.null(tst$estimate)) round(tst$estimate,3) else "—",
+                                      else if(!is.null(tst$estimate)) round(tst$estimate,3) else "\u2014",
                                       "bg-dark"),
-                              tarjeta("d.f.", if(tipo=="chisq") tst$parameter else "—", "bg-secondary")
+                              tarjeta("d.f.", if(tipo=="chisq") tst$parameter else "\u2014", "bg-secondary")
                ),
                div(class="dm-result-panel rounded mt-3",
                    tags$b("Observed contingency table:"), br(),
@@ -6230,11 +6434,11 @@ server <- function(input, output, session) {
                    if (p < 0.05)
                      tags$span(style="color:#CC0000;font-weight:600;",
                                paste0("Significant association (p=", formatC(p,digits=3,format="g"),
-                                      "). Las variables no son independientes."))
+                                      "). The variables are not independent."))
                    else
                      tags$span(class="dm-muted-txt",
                                paste0("No significant association (p=", formatC(p,digits=3,format="g"),
-                                      "). Las variables parecen independientes."))
+                                      "). The variables appear independent."))
                )
              )
         )
@@ -6243,24 +6447,24 @@ server <- function(input, output, session) {
     } else if (tipo %in% c("spearman","pearson")) {
       tst <- res$test; p <- tst$p.value; rho <- round(tst$estimate, 4)
       ci_txt <- if (!is.null(tst$conf.int))
-        paste0("[", round(tst$conf.int[1],3),", ",round(tst$conf.int[2],3),"]") else "—"
+        paste0("[", round(tst$conf.int[1],3),", ",round(tst$conf.int[2],3),"]") else "\u2014"
       fuerza <- if(abs(rho) >= 0.7) "strong" else if(abs(rho) >= 0.4) "moderate" else "weak"
-      direc  <- if(rho > 0) "positiva" else "negativa"
+      direc  <- if(rho > 0) "positive" else "negative"
       tagList(
         card(card_header(class="bg-success text-white fw-bold",
                          bsicons::bs_icon("check-circle"), " Results"),
              card_body(
                layout_columns(col_widths=c(4,4,4),
                               tarjeta("p-value", fmt_p(p), semaforo_p(p)),
-                              tarjeta(if(tipo=="spearman") "Spearman's rho" else "Pearson's r", rho,
+                              tarjeta(if(tipo=="spearman") "Spearman rho" else "Pearson r", rho,
                                       if(abs(rho)>=0.4)"bg-primary" else "bg-secondary"),
-                              tarjeta("IC 95%", ci_txt, "bg-dark")
+                              tarjeta("95% CI", ci_txt, "bg-dark")
                ),
                div(class="dm-result-panel rounded mt-3",
                    tags$b("Interpretation: "),
                    if (p < 0.05)
                      tags$span(style="color:#2C6FAC; font-weight:600;",
-                               paste0("Correlation ", fuerza, " ", direc, " (rho=", rho, ", p=",
+                               paste0(fuerza, " ", direc, " correlation (rho=", rho, ", p=",
                                       formatC(p,digits=3,format="g"), ")."))
                    else
                      tags$span(class="dm-muted-txt",
@@ -6272,7 +6476,7 @@ server <- function(input, output, session) {
       )
       
     } else if (tipo == "shapiro") {
-      Results_sw <- res$tests
+      resultados_sw <- res$tests
       tagList(
         card(card_header(class="bg-success text-white fw-bold",
                          bsicons::bs_icon("check-circle"), " Results"),
@@ -6280,8 +6484,8 @@ server <- function(input, output, session) {
                DTOutput("tabla_shapiro_detalle"),
                div(class="dm-result-panel rounded mt-2 p-2", style="font-size:0.85em;",
                    tags$b("Interpretation guide: "),
-                   "p > 0.05 → normality not rejected (distribution compatible with Normal). ",
-                   "p ≤ 0.05 → normality rejected → use non-parametric tests (Wilcoxon, Kruskal-Wallis).")
+                   "p > 0.05 \u2192 normality not rejected (distribution compatible with Normal). ",
+                   "p \u2264 0.05 \u2192 normality rejected \u2192 use non-parametric tests (Wilcoxon, Kruskal-Wallis).")
              )
         )
       )
@@ -6298,14 +6502,14 @@ server <- function(input, output, session) {
                               tarjeta("p-value", fmt_p(p), semaforo_p(p)),
                               tarjeta("Observed proportion", p_obs, "bg-primary"),
                               tarjeta("H0 proportion", res$p0, "bg-secondary"),
-                              tarjeta("IC 95%", ci_txt, "bg-dark")
+                              tarjeta("95% CI", ci_txt, "bg-dark")
                ),
                div(class="dm-result-panel rounded mt-3",
                    tags$b(paste0("Successes: ", res$x, " of ", res$n, " (", round(p_obs*100,1), "%)")), br(),
                    tags$b("Interpretation: "),
                    if (p < 0.05)
                      tags$span(style="color:#CC0000;font-weight:600;",
-                               paste0("The observed proportion (", p_obs, ") difiere significativamente de p0=",
+                               paste0("The observed proportion (", p_obs, ") differs significantly from p0=",
                                       res$p0, " (p=", formatC(p,digits=3,format="g"), ")."))
                    else
                      tags$span(class="dm-muted-txt",
@@ -6329,13 +6533,13 @@ server <- function(input, output, session) {
                               tarjeta(paste0("Prop. ", res$gb), p_b, "bg-info")
                ),
                div(class="dm-result-panel rounded mt-3",
-                   tags$b("Success defined as: "), paste0(res$var_y, " > mediana global (", round(res$med_global,3), ")"), br(),
+                   tags$b("Success defined as: "), paste0(res$var_y, " > global median (", round(res$med_global,3), ")"), br(),
                    tags$b(res$ga,": "), paste0(res$x_a,"/",res$n_a," = ",p_a), br(),
                    tags$b(res$gb,": "), paste0(res$x_b,"/",res$n_b," = ",p_b), br(), br(),
                    tags$b("Interpretation: "),
                    if (p < 0.05)
                      tags$span(style="color:#CC0000;font-weight:600;",
-                               paste0("The proportions are significantly different (p=",
+                               paste0("Proportions are significantly different (p=",
                                       formatC(p,digits=3,format="g"), ")."))
                    else
                      tags$span(class="dm-muted-txt",
@@ -6346,6 +6550,379 @@ server <- function(input, output, session) {
         )
       )
     }
+  })
+  
+  # Shapiro detail table
+  output$tabla_shapiro_detalle <- renderDT({
+    res <- test_resultado(); req(!is.null(res), res$tipo=="shapiro")
+    df_sw <- do.call(rbind, lapply(res$tests, function(x) {
+      data.frame(Group=x$grp, n=length(x$vals),
+                 W=round(x$res$statistic,4), p_value=formatC(x$res$p.value,digits=4,format="g"),
+                 Normal=if(x$res$p.value>0.05) "\u2713 Yes" else "\u2717 No",
+                 stringsAsFactors=FALSE)
+    }))
+    datatable(df_sw, rownames=FALSE, options=list(dom="t", pageLength=20),
+              class="table table-sm table-hover") |>
+      formatStyle("Normal",
+                  color=styleEqual(c("\u2713 Yes","\u2717 No"), c("#155724","#721c24")),
+                  fontWeight="bold")
+  }, server=FALSE)
+  
+  # ── Plot title ────────────────────────────────────────────────────────────────
+  output$ui_test_grafico_titulo <- renderUI({
+    res <- test_resultado(); if (is.null(res) || !is.null(res$error)) return(NULL)
+    tipo <- res$tipo
+    lbl  <- switch(tipo,
+                   wilcoxon  = "Comparative boxplot with significance annotation",
+                   kruskal   = "Boxplot by groups",
+                   chisq     = , fisher = "Mosaic of the contingency table",
+                   spearman  = , pearson = "Scatter plot with trend line",
+                   shapiro   = "QQ-plot (quantile-quantile) by group",
+                   ks        = "Empirical cumulative distribution functions (ECDF)",
+                   prop_binom = "Proportion bars with exact binomial CI",
+                   prop2     = "Compared proportion bars",
+                   burden    = "Burden boxplot per family",
+                   ""
+    )
+    tags$small(class="text-muted", lbl)
+  })
+  
+  # ── Test plot ─────────────────────────────────────────────────────────────────
+  output$plot_test_resultado <- renderPlotly({
+    res <- test_resultado()
+    if (is.null(res) || !is.null(res$error)) {
+      return(plot_ly() |> layout(
+        annotations=list(list(text="Run the test to see the plot",
+                              x=0.5,y=0.5,xref="paper",yref="paper",showarrow=FALSE,
+                              font=list(size=16,color="#AAAAAA"))),
+        xaxis=list(visible=FALSE), yaxis=list(visible=FALSE),
+        paper_bgcolor="#FAFAFA"))
+    }
+    tipo <- res$tipo
+    
+    if (tipo %in% c("wilcoxon","burden","ks")) {
+      ga <- res$grupos$A$nombre; gb <- res$grupos$B$nombre
+      ya <- res$grupos$A$vals;   yb <- res$grupos$B$vals
+      p  <- res$test$p.value
+      p_lbl <- paste0("p = ", formatC(p, digits=3, format="g"),
+                      if(p<0.001)" ***" else if(p<0.01)" **" else if(p<0.05)" *" else " ns")
+      
+      if (tipo == "ks") {
+        # ECDF
+        df_ecdf <- rbind(
+          data.frame(val=sort(ya), g=ga, stringsAsFactors=FALSE),
+          data.frame(val=sort(yb), g=gb, stringsAsFactors=FALSE)
+        )
+        fig <- plot_ly()
+        for (grp in c(ga,gb)) {
+          sub <- df_ecdf[df_ecdf$g==grp,]
+          n   <- nrow(sub)
+          fig <- add_trace(fig, x=sub$val, y=seq_len(n)/n, type="scatter", mode="lines",
+                           name=grp, line=list(width=2),
+                           hovertemplate=paste0(grp,"<br>x=%{x:.3f}<br>F(x)=%{y:.3f}<extra></extra>"))
+        }
+        layout(fig, xaxis=list(title=res$var_y %||% "value"),
+               yaxis=list(title="Cumulative F(x)", range=c(0,1)),
+               legend=list(orientation="h",y=-0.2),
+               annotations=list(list(x=0.5,y=1.05,xref="paper",yref="paper",
+                                     showarrow=FALSE,text=p_lbl,font=list(size=13,color=if(p<0.05)"#CC0000"else"#555"))),
+               plot_bgcolor="#FAFAFA",paper_bgcolor="#FFFFFF",margin=list(t=50))
+      } else {
+        # Boxplot + points
+        fig <- plot_ly()
+        for (grp in c(ga,gb)) {
+          vals <- if(grp==ga) ya else yb
+          col  <- if(grp==ga) "#2C6FAC" else "#E67E22"
+          fig  <- add_trace(fig, y=vals, name=grp, type="box",
+                            boxpoints="all", jitter=0.35, pointpos=0,
+                            marker=list(size=4,color=paste0(col,"88"),
+                                        line=list(color=col,width=0.5)),
+                            line=list(color=col), fillcolor=paste0(col,"33"),
+                            hovertemplate=paste0(grp,"<br>%{y:.3f}<extra></extra>"))
+        }
+        y_max <- max(c(ya,yb), na.rm=TRUE)
+        layout(fig,
+               yaxis=list(title=res$var_y %||% "value"),
+               xaxis=list(title=""),
+               showlegend=TRUE,
+               annotations=list(list(
+                 x=0.5, y=y_max * 1.05, xref="paper", yref="y",
+                 showarrow=FALSE, text=p_lbl,
+                 font=list(size=14, color=if(p<0.05)"#CC0000"else"#555"))),
+               margin=list(t=60,b=50),
+               plot_bgcolor="#FAFAFA",paper_bgcolor="#FFFFFF")
+      }
+      
+    } else if (tipo == "kruskal") {
+      var_y <- res$var_y; grp <- res$grp; grupos <- res$grupos
+      fig <- plot_ly()
+      for (g in grupos) {
+        vals <- res$df2[[var_y]][as.character(res$df2[[grp]])==g & is.finite(res$df2[[var_y]])]
+        col  <- HER_COLORS[g] %||% "#888888"
+        fig  <- add_trace(fig, y=vals, name=g, type="box",
+                          boxpoints="all", jitter=0.35, pointpos=0,
+                          marker=list(size=4,color=paste0(col,"88"),line=list(color=col,width=0.5)),
+                          line=list(color=col), fillcolor=paste0(col,"33"))
+      }
+      p <- res$test$p.value
+      layout(fig,
+             yaxis=list(title=var_y), xaxis=list(title=""),
+             showlegend=FALSE,
+             title=list(text=paste0("Kruskal-Wallis \u00b7 p=",formatC(p,digits=3,format="g"),
+                                    if(p<0.05)" ***"else" ns"),
+                        font=list(size=13,color=if(p<0.05)"#CC0000"else"#555")),
+             margin=list(t=60,b=60,l=60),
+             plot_bgcolor="#FAFAFA",paper_bgcolor="#FFFFFF")
+      
+    } else if (tipo %in% c("chisq","fisher")) {
+      tbl <- res$tabla
+      # Heatmap of standardised residuals
+      if (tipo=="chisq" && !is.null(res$test$residuals)) {
+        z_mat <- res$test$residuals
+      } else {
+        exp_mat <- outer(rowSums(tbl), colSums(tbl)) / sum(tbl)
+        z_mat   <- (tbl - exp_mat) / sqrt(exp_mat + 1e-9)
+      }
+      plot_ly(z=z_mat, x=colnames(tbl), y=rownames(tbl), type="heatmap",
+              colorscale=list(c(0,"#0066CC"),c(0.5,"#FFFFFF"),c(1,"#CC0000")),
+              zmid=0,
+              text=matrix(paste0("Obs:",tbl,"\nRes:",round(z_mat,2)), nrow=nrow(tbl)),
+              hovertemplate="Row:%{y}<br>Col:%{x}<br>%{text}<extra></extra>") |>
+        layout(xaxis=list(title=res$v2,tickangle=-30),
+               yaxis=list(title=res$v1,autorange="reversed"),
+               title=list(text="Pearson standardised residuals (red = higher than expected)",
+                          font=list(size=11)),
+               margin=list(t=60,b=80,l=100),paper_bgcolor="#FFFFFF")
+      
+    } else if (tipo %in% c("spearman","pearson")) {
+      x <- res$x; y <- res$y
+      rho <- round(res$test$estimate,3); p <- res$test$p.value
+      # Trend line (regression)
+      fit <- lm(y ~ x)
+      x_seq <- seq(min(x,na.rm=TRUE), max(x,na.rm=TRUE), length.out=100)
+      y_fit <- coef(fit)[1] + coef(fit)[2] * x_seq
+      x_lbl <- if(isTRUE(res$log_x)) paste0("log10(",res$vx,")") else res$vx
+      fig <- plot_ly(x=x, y=y, type="scatter", mode="markers", name="Variants",
+                     marker=list(color="#2C6FAC", size=5, opacity=0.6,
+                                 line=list(color="#2C6FAC",width=0.4)),
+                     hovertemplate=paste0(x_lbl,"=%{x:.3f}<br>",res$vy,"=%{y:.3f}<extra></extra>")) |>
+        add_trace(x=x_seq, y=y_fit, type="scatter", mode="lines", name="Trend",
+                  line=list(color="#CC0000",width=2,dash="dash")) |>
+        layout(xaxis=list(title=x_lbl), yaxis=list(title=res$vy),
+               legend=list(orientation="h",y=-0.2),
+               title=list(text=paste0(if(tipo=="spearman")"rho"else"r","=",rho,
+                                      " \u00b7 p=",formatC(p,digits=3,format="g"),
+                                      if(p<0.05)" *"else" ns"),
+                          font=list(size=13,color=if(p<0.05)"#2C6FAC"else"#555")),
+               margin=list(t=60), plot_bgcolor="#FAFAFA",paper_bgcolor="#FFFFFF")
+      
+    } else if (tipo == "shapiro") {
+      # QQ-plots by group
+      fig <- plot_ly()
+      colores <- c("#2C6FAC","#CC0000","#27AE60","#E67E22","#8E44AD","#16A085")
+      for (i in seq_along(res$tests)) {
+        it  <- res$tests[[i]]
+        v   <- sort(it$vals)
+        n   <- length(v)
+        col <- colores[((i-1) %% length(colores)) + 1]
+        probs <- (seq_len(n) - 0.375) / (n + 0.25)
+        q_teo <- qnorm(probs)
+        fig <- add_trace(fig, x=q_teo, y=v, type="scatter", mode="markers", name=it$grp,
+                         marker=list(color=col,size=5,opacity=0.7))
+      }
+      x_range <- c(-3,3)
+      fig <- add_trace(fig, x=x_range, y=x_range*sd(res$tests[[1]]$vals)+mean(res$tests[[1]]$vals),
+                       type="scatter", mode="lines", name="Theoretical normal",
+                       line=list(color="#AAAAAA",dash="dash",width=1.5), showlegend=TRUE)
+      layout(fig, xaxis=list(title="Theoretical normal quantiles"),
+             yaxis=list(title="Observed quantiles"),
+             legend=list(orientation="h",y=-0.2),
+             title=list(text="Deviation from the line \u2192 non-normality", font=list(size=11)),
+             margin=list(t=50,b=80), plot_bgcolor="#FAFAFA",paper_bgcolor="#FFFFFF")
+      
+    } else if (tipo == "prop_binom") {
+      p_obs <- res$x / res$n; p0 <- res$p0
+      ci    <- binom.test(res$x, res$n)$conf.int
+      df_bar <- data.frame(
+        etiqueta = c("Observed","Expected (H0)"),
+        prop     = c(p_obs, p0),
+        color    = c("#2C6FAC","#AAAAAA")
+      )
+      plot_ly(df_bar, x=~etiqueta, y=~prop, type="bar",
+              marker=list(color=~color, line=list(color="#FFFFFF",width=1)),
+              text=~paste0(round(prop*100,1),"%"), textposition="outside",
+              hovertemplate="%{x}<br>%{y:.4f}<extra></extra>") |>
+        add_trace(x=c("Observed","Observed"), y=c(ci[1],ci[2]),
+                  type="scatter", mode="lines", line=list(color="#CC0000",width=3),
+                  name="95% CI", hovertemplate="95% CI: %{y:.3f}<extra></extra>") |>
+        layout(yaxis=list(title="Proportion", range=c(0, max(p_obs,p0)*1.3)),
+               xaxis=list(title=""), showlegend=TRUE,
+               legend=list(orientation="h",y=-0.2),
+               margin=list(t=30,b=60), plot_bgcolor="#FAFAFA",paper_bgcolor="#FFFFFF")
+      
+    } else if (tipo == "prop2") {
+      ga <- res$ga; gb <- res$gb
+      p_a <- res$x_a/res$n_a; p_b <- res$x_b/res$n_b
+      ci_a <- binom.test(res$x_a,res$n_a)$conf.int
+      ci_b <- binom.test(res$x_b,res$n_b)$conf.int
+      df_b <- data.frame(g=c(ga,gb), p=c(p_a,p_b),
+                         lo=c(ci_a[1],ci_b[1]), hi=c(ci_a[2],ci_b[2]))
+      fig <- plot_ly(df_b, x=~g, y=~p, type="bar",
+                     marker=list(color=c("#2C6FAC","#E67E22"),
+                                 line=list(color="#FFFFFF",width=1)),
+                     text=~paste0(round(p*100,1),"%"), textposition="outside",
+                     hovertemplate="%{x}<br>%{y:.4f}<extra></extra>") |>
+        add_trace(type="scatter", mode="markers+lines",
+                  x=df_b$g, y=df_b$lo, name="CI lower",
+                  marker=list(color="#CC0000",symbol="line-ew",size=12,
+                              line=list(color="#CC0000",width=2)), showlegend=FALSE) |>
+        add_trace(type="scatter", mode="markers",
+                  x=df_b$g, y=df_b$hi, name="CI upper",
+                  marker=list(color="#CC0000",symbol="line-ew",size=12,
+                              line=list(color="#CC0000",width=2)), showlegend=FALSE)
+      pval_txt <- paste0("p=",formatC(res$test$p.value,digits=3,format="g"),
+                         if(res$test$p.value<0.05)" *"else" ns")
+      layout(fig, yaxis=list(title="Proportion",range=c(0,max(df_b$hi)*1.3)),
+             xaxis=list(title=""), showlegend=FALSE,
+             annotations=list(list(x=0.5,y=max(df_b$hi)*1.2,xref="paper",yref="y",
+                                   showarrow=FALSE,text=pval_txt,
+                                   font=list(size=14,color=if(res$test$p.value<0.05)"#CC0000"else"#555"))),
+             margin=list(t=60,b=60), plot_bgcolor="#FAFAFA",paper_bgcolor="#FFFFFF")
+    }
+  })
+  
+  # ── Test data table ───────────────────────────────────────────────────────────
+  output$tabla_test_datos <- renderDT({
+    res <- test_resultado()
+    if (is.null(res) || !is.null(res$error)) return(NULL)
+    tipo <- res$tipo
+    df_show <- tryCatch({
+      if (tipo %in% c("wilcoxon","burden")) {
+        rbind(
+          data.frame(Group=res$grupos$A$nombre, Value=res$grupos$A$vals, stringsAsFactors=FALSE),
+          data.frame(Group=res$grupos$B$nombre, Value=res$grupos$B$vals, stringsAsFactors=FALSE)
+        )
+      } else if (tipo == "kruskal") {
+        df2 <- res$df2
+        data.frame(Group=as.character(df2[[res$grp]]), Value=df2[[res$var_y]],
+                   stringsAsFactors=FALSE)
+      } else if (tipo %in% c("chisq","fisher")) {
+        as.data.frame.matrix(res$tabla)
+      } else if (tipo %in% c("spearman","pearson")) {
+        data.frame(X=res$x, Y=res$y, stringsAsFactors=FALSE)
+      } else if (tipo == "shapiro") {
+        do.call(rbind, lapply(res$tests, function(x)
+          data.frame(Group=x$grp, W=round(x$res$statistic,4),
+                     p=formatC(x$res$p.value,digits=4,format="g"),
+                     Normal=x$res$p.value>0.05, stringsAsFactors=FALSE)))
+      } else if (tipo == "ks") {
+        rbind(
+          data.frame(Group=res$grupos$A$nombre, Value=res$grupos$A$vals),
+          data.frame(Group=res$grupos$B$nombre, Value=res$grupos$B$vals))
+      } else if (tipo == "prop_binom") {
+        data.frame(Variable=res$var, Success=res$exito, n=res$n, Successes=res$x,
+                   Obs_prop=round(res$x/res$n,4), p0=res$p0)
+      } else if (tipo == "prop2") {
+        data.frame(Group=c(res$ga,res$gb), n=c(res$n_a,res$n_b),
+                   Successes=c(res$x_a,res$x_b),
+                   Prop=round(c(res$x_a/res$n_a, res$x_b/res$n_b),4))
+      }
+    }, error=function(e) data.frame(Info="Not available"))
+    datatable(df_show, rownames=FALSE, options=list(dom="ftp",pageLength=10,scrollX=TRUE),
+              class="table table-sm table-hover")
+  }, server=TRUE)
+  
+  # =============================================================================
+  # HPOs TAB — SERVER LOGIC
+  # =============================================================================
+  
+  hpo_familias_disponibles <- reactive({
+    res  <- rv$resultados
+    fams <- character(0)
+    if (!is.null(res$CNVs) && nrow(res$CNVs) > 0 && "ID_Familia" %in% names(res$CNVs))
+      fams <- union(fams, as.character(res$CNVs$ID_Familia))
+    if (!is.null(res$SVs) && nrow(res$SVs) > 0 && "ID_Familia" %in% names(res$SVs))
+      fams <- union(fams, as.character(res$SVs$ID_Familia))
+    sort(unique(fams))
+  })
+  
+  observe({
+    fams <- hpo_familias_disponibles()
+    updateSelectizeInput(session, "hpo_familias_sel",
+                         choices  = fams,
+                         selected = if (length(fams) > 0) fams[1] else NULL,
+                         server   = TRUE)
+    updateSelectizeInput(session, "hpo_fam_nota_sel",
+                         choices  = fams,
+                         selected = if (length(fams) > 0) fams[1] else NULL,
+                         server   = TRUE)
+  })
+  
+  hpo_genes_tabla <- reactive({
+    fams_sel  <- input$hpo_familias_sel
+    if (is.null(fams_sel) || length(fams_sel) == 0) return(data.frame())
+    solo_sfari <- isTRUE(input$hpo_solo_sfari)
+    res <- rv$resultados
+    dfs <- list()
+    if (!is.null(res$CNVs) && nrow(res$CNVs) > 0) dfs[["CNVs"]] <- res$CNVs
+    if (!is.null(res$SVs)  && nrow(res$SVs)  > 0) dfs[["SVs"]]  <- res$SVs
+    if (length(dfs) == 0) return(data.frame())
+    filas <- bind_rows(lapply(dfs, function(df) {
+      df_f <- df[as.character(df$ID_Familia) %in% fams_sel, , drop = FALSE]
+      if ("Annotation_mode" %in% names(df_f))
+        df_f <- df_f[!is.na(df_f$Annotation_mode) & df_f$Annotation_mode == "full", , drop = FALSE]
+      df_f
+    }))
+    if (is.null(filas) || nrow(filas) == 0) return(data.frame())
+    # Find gene column robustly
+    gene_col <- names(filas)[grep("gene", names(filas), ignore.case = TRUE)][1]
+    if (is.na(gene_col)) return(data.frame())
+    if (solo_sfari && "En_Panel_SFARI" %in% names(filas))
+      filas <- filas[es_sfari_col(filas$En_Panel_SFARI), , drop = FALSE]
+    gene_raw <- toupper(trimws(as.character(filas[[gene_col]])))
+    genes_v  <- unique(trimws(unlist(strsplit(
+      paste(gene_raw[!is.na(gene_raw) & gene_raw != "" & gene_raw != "."], collapse = ";"),
+      "[;,/|[:space:]]+"
+    ))))
+    genes_v <- sort(genes_v[nzchar(genes_v) & genes_v != "." & toupper(genes_v) != "NA"])
+    if (length(genes_v) == 0) return(data.frame())
+    data.frame(gen = genes_v, stringsAsFactors = FALSE)
+  })
+  
+  output$ui_hpo_n_genes <- renderUI({
+    n <- nrow(hpo_genes_tabla())
+    if (n == 0) tags$span(class = "badge bg-secondary", "0")
+    else        tags$span(class = "badge bg-primary",   n)
+  })
+  
+  output$ui_hpo_genes_lista <- renderUI({
+    df_g <- hpo_genes_tabla()
+    if (nrow(df_g) == 0)
+      return(div(class = "text-muted small fst-italic p-2",
+                 "No genes for the selected families."))
+    busq  <- trimws(input$hpo_buscar_gen %||% "")
+    genes <- df_g$gen
+    if (nzchar(busq))
+      genes <- genes[grepl(busq, genes, ignore.case = TRUE)]
+    if (length(genes) == 0)
+      return(div(class = "text-muted small fst-italic p-2", "No matches."))
+    hpo_color <- "#007B7B"
+    div(
+      class = "d-flex flex-wrap gap-1 p-1",
+      style = "max-height:calc(90vh - 230px); overflow-y:auto;",
+      lapply(genes, function(g) {
+        tags$button(
+          class   = "btn btn-sm",
+          style   = paste0("font-size:0.78em; font-weight:600; background:", hpo_color,
+                           "; color:#fff; border-color:", hpo_color,
+                           "; border-radius:14px; padding:2px 10px;"),
+          type    = "button",
+          title   = paste0("View HPO for ", g),
+          onclick = paste0("hpoSelGen('", g, "');"),
+          g
+        )
+      })
+    )
   })
   
   # Shapiro detail table
