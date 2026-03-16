@@ -630,6 +630,11 @@ ui <- page_navbar(
             radioButtons("filtro_modalidad", "Modality", choices  = c("CNVs", "SVs", "Both"), selected = "Both", inline = TRUE),
             hr(),
             selectizeInput("filtro_familia", "Family/Families", choices  = NULL, multiple = TRUE, options  = list(placeholder = "All")),
+            selectInput("filtro_done", "✅ Work status",
+                        choices  = c("All"     = "all",
+                                     "Done ✅"  = "done",
+                                     "Pending ⬜" = "pending"),
+                        selected = "all"),
             selectizeInput("filtro_herencia", "Inheritance type", choices  = NULL, multiple = TRUE, options  = list(placeholder = "All")),
             selectizeInput("filtro_sv_type", "Variant type", choices  = NULL, multiple = TRUE, options  = list(placeholder = "All")),
             selectizeInput("filtro_rango", "Range type", choices  = c("Strict","Wide","Outside"), multiple = TRUE, options  = list(placeholder = "All")),
@@ -1527,7 +1532,10 @@ server <- function(input, output, session) {
     sexos               = list(),      # lista nombrada: ID_Familia -> "M" | "F" | NULL
     fenotipos           = list(),      # lista nombrada: ID_Familia -> texto libre de fenotipo
     hpo_notas           = list(),      # named list: ID_Family -> patient HPO description
-    pendiente_seleccion = NULL         # list(fam, sta, end) — seleccion pendiente en tabla
+    pendiente_seleccion = NULL,       # list(fam, sta, end) — seleccion pendiente en tabla
+    hpo_notas           = list(),
+    pendiente_seleccion = NULL,
+    done                = list(),   # named list: ID_Familia -> TRUE
   )
   # =============================================================================
   # IDEOGRAM — Server logic
@@ -1790,8 +1798,13 @@ server <- function(input, output, session) {
           rv$flags <- union(rv$flags, c(saved[n_pipes != 4L], con_modo))
         }
       }
-      
-      # Cargar notas
+      #Load DONE
+      ruta_done <- file.path(APP_LOGS_DIR, ".done_familias.rds")
+      if (file.exists(ruta_done)) {
+        saved_done <- tryCatch(readRDS(ruta_done), error = function(e) NULL)
+        if (!is.null(saved_done) && is.list(saved_done)) rv$done <- saved_done
+      }
+      # Load notes
       ruta_n <- file.path(APP_LOGS_DIR, ".notas_variantes.rds")
       if (file.exists(ruta_n)) {
         saved_n <- tryCatch(readRDS(ruta_n), error = function(e) NULL)
@@ -1820,15 +1833,15 @@ server <- function(input, output, session) {
     })
   })
   
-  # ── RUTAS CENTRALIZADAS A LA CARPETA LOGS ──
+  # ── Centralized routes of conserved elements ──
   ruta_flags_file     <- reactive({ file.path(APP_LOGS_DIR, ".flags_variantes.rds") })
   ruta_notas_file     <- reactive({ file.path(APP_LOGS_DIR, ".notas_variantes.rds") })
   ruta_sexos_file     <- reactive({ file.path(APP_LOGS_DIR, ".sexos_familias.rds") })
   ruta_clasif_file    <- reactive({ file.path(APP_LOGS_DIR, ".clasificaciones_variantes.rds") })
   ruta_fenotipos_file <- reactive({ file.path(APP_LOGS_DIR, ".fenotipos_familias.rds") })
   ruta_hpo_notas_file <- reactive({ file.path(APP_LOGS_DIR, ".hpo_notas_familias.rds") })
-  
-  # Auto-guardado reactivo: cada vez que rv$flags cambia, persiste en disco
+  ruta_done_file <- reactive({ file.path(APP_LOGS_DIR, ".done_familias.rds") })
+  # Reactive autosave
   observe({
     flags_actuales <- rv$flags
     ruta_fl <- tryCatch(ruta_flags_file(), error = function(e) NULL)
@@ -1842,7 +1855,7 @@ server <- function(input, output, session) {
     }
   })
   
-  # Auto-guardado reactivo de notas
+  # Notes autosave
   observe({
     notas_actuales <- rv$notas
     ruta_n <- tryCatch(ruta_notas_file(), error = function(e) NULL)
@@ -1863,7 +1876,7 @@ server <- function(input, output, session) {
       }, error = function(e) {})
     }
   })
-  # Auto-guardado reactivo de clasificaciones
+  # Classification autosave
   observe({
     cl <- rv$clasificaciones
     ruta_cl <- tryCatch(ruta_clasif_file(), error = function(e) NULL)
@@ -1874,7 +1887,7 @@ server <- function(input, output, session) {
       }, error = function(e) {})
     }
   })
-  # Auto-guardado reactivo de fenotipos
+  # Phenotype autosave
   observe({
     ft <- rv$fenotipos
     ruta_ft <- tryCatch(ruta_fenotipos_file(), error = function(e) NULL)
@@ -1885,7 +1898,7 @@ server <- function(input, output, session) {
       }, error = function(e) {})
     }
   })
-  # Auto-guardado reactivo de notas HPO
+  # HPO autosave
   observe({
     hn <- rv$hpo_notas
     ruta_hn <- tryCatch(ruta_hpo_notas_file(), error = function(e) NULL)
@@ -1893,6 +1906,17 @@ server <- function(input, output, session) {
       tryCatch({
         if (!dir.exists(dirname(ruta_hn))) dir.create(dirname(ruta_hn), recursive = TRUE)
         saveRDS(hn, ruta_hn)
+      }, error = function(e) {})
+    }
+  })
+  # Reactive auto-save of DONE families
+  observe({
+    done_actual <- rv$done
+    ruta_d <- tryCatch(ruta_done_file(), error = function(e) NULL)
+    if (!is.null(ruta_d) && nchar(trimws(ruta_d)) > 0) {
+      tryCatch({
+        if (!dir.exists(dirname(ruta_d))) dir.create(dirname(ruta_d), recursive = TRUE)
+        saveRDS(done_actual, ruta_d)
       }, error = function(e) {})
     }
   })
@@ -2257,6 +2281,15 @@ server <- function(input, output, session) {
           df <- df[clasif_df == clasif_sel, , drop = FALSE]
       }
     }
+    done_sel <- input$filtro_done
+    if (!is.null(done_sel) && done_sel != "all") {
+      all_fams_df <- as.character(df$ID_Familia)
+      fams_done   <- names(rv$done)[vapply(rv$done, isTRUE, logical(1))]
+      if (done_sel == "done")
+        df <- df[all_fams_df %in% fams_done,  , drop = FALSE]
+      else if (done_sel == "pending")
+        df <- df[!all_fams_df %in% fams_done, , drop = FALSE]
+    }
     score_col <- suppressWarnings(as.numeric(df$AnnotSV_ranking_score))
     solo_con_score <- isTRUE(input$filtro_solo_con_score)
     if (solo_con_score) {
@@ -2359,7 +2392,12 @@ server <- function(input, output, session) {
       if (is.null(s) || !nzchar(s)) "—"
       else if (s == "M") "♂" else "♀"
     }, character(1))
-    df_show <- df_show[, c("Tag", "Clasif", "Sexo", setdiff(names(df_show), c("Tag", "Clasif", "Sexo"))), drop = FALSE]
+    df_show$Done <- vapply(as.character(df$ID_Familia), function(fid) {
+      if (isTRUE(rv$done[[fid]])) "\u2705" else "\u2b1c"
+    }, character(1))
+    df_show <- df_show[, c("Tag", "Clasif", "Sexo", "Done",
+                           setdiff(names(df_show),
+                                   c("Tag","Clasif","Sexo","Done"))), drop = FALSE]
     df_show$Herencia_Limpia <- trimws(sub("\\s*\\[.*", "", as.character(df_show$Tipo_Herencia)))
     
     idx_archivo <- which(names(df_show) == "._archivo_") - 1
@@ -2367,6 +2405,7 @@ server <- function(input, output, session) {
     idx_Tag <- which(names(df_show) == "Tag") - 0
     idx_clasif  <- which(names(df_show) == "Clasif") - 0
     idx_sexo    <- which(names(df_show) == "Sexo") - 0
+    idx_done <- which(names(df_show) == "Done") - 0
     
     js_cb <- "function(settings) { $('#tabla_variantes').off('click.flagbtn').on('click.flagbtn', '.flag-btn', function(e) { e.stopPropagation(); var clave = $(this).data('clave'); Shiny.setInputValue('flag_btn_click', {clave: clave, t: Date.now()}, {priority: 'event'}); }); }"
     
@@ -2387,7 +2426,7 @@ server <- function(input, output, session) {
       options    = list(
         stateSave= TRUE,
         dom = "Bfrtip", buttons = list("colvis"), scrollX = TRUE, scrollY = "530px", scroller = TRUE, deferRender = TRUE,
-        columnDefs = list(list(visible = FALSE, targets = c(idx_archivo, idx_limpia)), list(targets = idx_Tag, title = "🏳", orderable = FALSE, width = "40px"), list(targets = idx_clasif, title = "🏷", orderable = FALSE, width = "34px", className = "dt-center"), list(targets = idx_sexo, title = "♂/♀", width = "36px", className = "dt-center")),
+        columnDefs = list(list(visible = FALSE, targets = c(idx_archivo, idx_limpia)), list(targets = idx_Tag, title = "🏳", orderable = FALSE, width = "40px"), list(targets = idx_clasif, title = "🏷", orderable = FALSE, width = "34px", className = "dt-center"), list(targets = idx_sexo, title = "♂/♀", width = "36px", className = "dt-center"),list(targets = idx_done, title = "✅", orderable = TRUE, width = "38px", className = "dt-center")),
         initComplete = JS(js_cb)
       ), class = "table table-hover table-sm"
     ) |>
@@ -2403,6 +2442,9 @@ server <- function(input, output, session) {
       formatStyle("En_Panel_Genes", 
                   backgroundColor = styleEqual(c("TRUE","Yes","Yes","Yes","FALSE","No","NO","False",TRUE,FALSE), bg_sfa), 
                   color = txt_color, fontWeight = styleEqual(c("TRUE","Yes","Yes","Yes",TRUE), c("bold","bold","bold","bold","bold"))) |>
+      formatStyle("Done",
+                  color = styleEqual(c("\u2705", "\u2b1c"), c("#155724", "#888888")),
+                  fontWeight = styleEqual("\u2705", "bold")) |>
       (\(tbl) {
         if ("Genotipo_Hijo" %in% names(df_show))
           formatStyle(tbl, "Genotipo_Hijo",
@@ -2770,6 +2812,28 @@ server <- function(input, output, session) {
                          class = "btn-outline-secondary btn-sm",
                          title = "Remove sex information for this family")
       ),
+      # ── DONE marker ───────────────────────────────────────────────────────
+      div(
+        class = "d-flex align-items-center gap-2 px-2 py-1 rounded mb-1 dm-clasif-panel",
+        tags$span(class = "text-muted small",
+                  tags$b("Work status:"),
+                  if (!is.null(fam_sel_det))
+                    tags$span(class = "ms-1 text-secondary",
+                              paste0("(", fam_sel_det, ")"))
+        ),
+        if (!is.null(fam_sel_det)) {
+          is_done <- isTRUE(rv$done[[fam_sel_det]])
+          actionButton(
+            "btn_done_toggle",
+            label = if (is_done) "\u2705 Done — click to reopen" else "\u2b1c Mark as Done",
+            class = if (is_done) "btn-success btn-sm" else "btn-outline-success btn-sm",
+            title = if (is_done)
+              "Family marked as Done. Click to undo."
+            else
+              "Mark this family as Done (work completed)"
+          )
+        }
+      ),
       # ── Family clinical phenotype ─────────────────────────────────────
       local({
         fenotipo_guardado <- if (!is.null(fam_sel_det)) rv$fenotipos[[fam_sel_det]] %||% "" else ""
@@ -2993,6 +3057,28 @@ server <- function(input, output, session) {
       showNotification(paste0("❌ Proband TSV not found for family ", fd$ID_Familia[1], "."), type = "error", duration = 6)
     } else {
       if (!abrir_archivo_nativo(ruta_tsv)) showNotification("Could not open the TSV file.", type = "error")
+    }
+  })
+  # ── DONE family marker ────────────────────────────────────────────────────
+  observeEvent(input$btn_done_toggle, {
+    fd <- rv$fila_data
+    req(!is.null(fd), nrow(fd) > 0)
+    fam <- as.character(fd$ID_Familia[1])
+    ts  <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+    if (isTRUE(rv$done[[fam]])) {
+      rv$done[[fam]] <- NULL
+      rv$historial <- c(rv$historial, list(list(
+        ts = ts, tipo = "\u2b1c Reopened", clave = fam, detalle = "Work status set to Pending"
+      )))
+      showNotification(paste0("\u2b1c Family ", fam, " set back to Pending."),
+                       type = "warning", duration = 2)
+    } else {
+      rv$done[[fam]] <- TRUE
+      rv$historial <- c(rv$historial, list(list(
+        ts = ts, tipo = "\u2705 Done", clave = fam, detalle = "Work marked as completed"
+      )))
+      showNotification(paste0("\u2705 Family ", fam, " marked as Done."),
+                       type = "message", duration = 2)
     }
   })
   
@@ -5701,6 +5787,7 @@ server <- function(input, output, session) {
         stringsAsFactors = FALSE
       )
     }))
+   
     datatable(df_h, rownames = FALSE, options = list(
       dom = "frtip", pageLength = 25, order = list(list(0, "desc")),
       columnDefs = list(list(width = "160px", targets = 0), list(width = "160px", targets = 1))
