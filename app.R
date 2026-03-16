@@ -5718,7 +5718,7 @@ server <- function(input, output, session) {
   
   # Reactive: clean dataset for tests (without Results tab filters)
   test_datos_base <- reactive({
-    datos <- rv$resultados
+    datos <- rv$Results
     if (is.null(datos$CNVs) && is.null(datos$SVs)) return(data.frame())
     cnv <- if (!is.null(datos$CNVs)) mutate(datos$CNVs, Modalidad="CNV") else data.frame()
     sv  <- if (!is.null(datos$SVs))  mutate(datos$SVs,  Modalidad="SV")  else data.frame()
