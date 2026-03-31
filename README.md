@@ -9,7 +9,7 @@ The pipeline processes [AnnotSV](https://lbgi.fr/AnnotSV/)-annotated output file
 ## Features
 
 - **Automated pipeline** (`FiltroB_STEA.R`): filters and annotates CNV/SV calls from trio families (proband + parents), classifies inheritance (de novo, maternal, paternal, joint), and scores variants.
-- **Interactive Shiny app** (`app.R`): real-time pipeline execution, variant table with filtering/tagging/classification, genomic ideogram visualization, family comparator, statistical tests, and HPO integration via JAX API.
+- **Interactive Shiny app** (`STEA CNVSV Analysis Pipeline.R`): real-time pipeline execution, variant table with filtering/tagging/classification, genomic ideogram visualization, family comparator, statistical tests, and HPO integration via JAX API.
 - **Configurable**: thresholds for similarity, Jaccard overlap, lateral margin, and deduplication are all adjustable from the UI.
 - **Persistent annotations**: variant flags, clinical classifications, notes, sex, phenotype, and HPO terms are saved locally between sessions.
 
