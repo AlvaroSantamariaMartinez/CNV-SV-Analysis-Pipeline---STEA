@@ -1,91 +1,129 @@
-# instalar_dependencias.R
-# Run this script ONCE before launching the app
-# ─────────────────────────────────────────────────────────────────────────────
-# This script installs all R packages required by the CNV/SV Analysis Pipeline.
-# Bioconductor packages (GenomicRanges, IRanges) require BiocManager.
-# Optional packages are listed at the bottom.
-# ─────────────────────────────────────────────────────────────────────────────
+# =============================================================================
+# Install_Dependencies.R
+# Instalación de todas las dependencias del repositorio CNV/SV Analysis Pipeline
+# Scripts:
+#   - STEA CNVSV Analysis Pipeline.R
+#   - FiltroB_STEA.R
+#
+# Uso: ejecutar este script una sola vez antes de lanzar la aplicación.
+# Requiere R >= 4.3 y conexión a internet.
+# =============================================================================
 
-# ── CRAN packages ─────────────────────────────────────────────────────────────
-pkgs_cran <- c(
-  # Core Shiny + UI
-  "shiny",          # Web application framework
-  "bslib",          # Bootstrap 5 themes
-  "bsicons",        # Bootstrap icons
-  "shinyjs",        # JavaScript helpers (enable/disable/runjs)
-  "shinyFiles",     # Native file/folder picker
 
-  # Tables
-  "DT",             # Interactive DataTables
+# -----------------------------------------------------------------------------
+# 1. PAQUETES DE CRAN
+# -----------------------------------------------------------------------------
+cran_packages <- c(
+  # Interfaz Shiny y UI
+  "shiny",        # Framework principal de la aplicación web
+  "bslib",        # Temas Bootstrap modernos y layout cards/navbars
+  "bsicons",      # Iconos Bootstrap para bslib
+  "DT",           # Tablas interactivas (DataTables)
+  "plotly",       # Gráficos interactivos
+  "shinyFiles",   # Selector de archivos/carpetas nativo en Shiny
+  "shinyjs",      # JavaScript helpers para Shiny (enable/disable, runjs…)
 
-  # Interactive plots
-  "plotly",         # Interactive charts
+  # Ejecución de procesos externos
+  "processx",     # Lanzar y monitorear procesos R externos (pipeline backend)
 
-  # Static plots
-  "ggplot2",        # Grammar of graphics
-  "gridExtra",      # Arrange multiple ggplot panels
-  "grid",           # Low-level graphics (base R, listed for clarity)
+  # Lectura y escritura de archivos
+  "openxlsx",     # Crear y escribir archivos Excel (.xlsx) con estilos
+  "readxl",       # Leer archivos Excel (.xlsx / .xls)
+  "data.table",   # Lectura rápida de TSVs (fread) y manipulación eficiente
 
-  # Async pipeline execution
-  "processx",       # Subprocesses with real-time stdout/stderr
+  # Manipulación de datos
+  "dplyr",        # Verbos de transformación de datos (filter, mutate, bind_rows…)
+  "tidyr",        # Reshaping de datos (pivot, unnest…)
+  "stringr",      # Manipulación de cadenas de texto (str_trim, str_detect…)
 
-  # Excel I/O
-  "openxlsx",       # Read/write .xlsx with styles
-  "readxl",         # Read .xlsx (fast, read-only)
+  # Visualización
+  "ggplot2",      # Gráficos estáticos base
+  "gridExtra",    # Composición de múltiples gráficos ggplot2
+  "scales",       # Escalas y formateo de ejes en ggplot2
 
-  # Data wrangling
-  "dplyr",
-  "tidyr",
-  "stringr",
-  "scales",
-  "data.table",     # High-performance data operations in pipeline
+  # Comunicación HTTP y datos JSON
+  "httr",         # Peticiones HTTP (consultas a APIs externas: ClinVar, OMIM…)
+  "jsonlite",     # Parseo y serialización de JSON
 
-  # Web / API
-  "httr",           # HTTP requests (HPO API, external databases)
-  "jsonlite",       # JSON parsing
-
-  # Parallel processing
-  "parallel"        # Built-in, but listed for documentation purposes
+  # IDE / entorno de desarrollo
+  "rstudioapi"    # Detectar ruta del script activo en RStudio
 )
 
-# ── Bioconductor packages ──────────────────────────────────────────────────────
-pkgs_bioc <- c(
-  "GenomicRanges",  # Genomic interval arithmetic
-  "IRanges"         # Underlying ranges infrastructure
-)
+cat("=============================================================================\n")
+cat("Instalando paquetes CRAN...\n")
+cat("=============================================================================\n")
 
-# ── Optional packages (uncomment to install) ──────────────────────────────────
-pkgs_optional <- c(
-  "png",        # Read PNG images (used in some plot exports)
-  "webshot2"    # PDF/PNG export of web-based plots (requires Chrome)
-)
-
-# ── Installer function ─────────────────────────────────────────────────────────
-install_if_missing <- function(pkg, bioc = FALSE) {
-  if (!requireNamespace(pkg, quietly = TRUE)) {
-    message("Installing: ", pkg)
-    if (bioc) {
-      if (!requireNamespace("BiocManager", quietly = TRUE))
-        install.packages("BiocManager")
-      BiocManager::install(pkg, ask = FALSE, update = FALSE)
-    } else {
-      install.packages(pkg, repos = "https://cloud.r-project.org")
-    }
-  } else {
-    message("Already installed: ", pkg)
+install_if_missing <- function(pkgs) {
+  missing_pkgs <- pkgs[!pkgs %in% rownames(installed.packages())]
+  if (length(missing_pkgs) == 0) {
+    cat("✓ Todos los paquetes CRAN ya están instalados.\n")
+    return(invisible(NULL))
   }
+  cat(paste0("  Instalando: ", paste(missing_pkgs, collapse = ", "), "\n"))
+  install.packages(
+    missing_pkgs,
+    dependencies = TRUE,
+    repos        = "https://cloud.r-project.org"
+  )
 }
 
-# ── Install ────────────────────────────────────────────────────────────────────
-message("\n── Installing CRAN packages ──────────────────────────────────")
-invisible(lapply(pkgs_cran, install_if_missing, bioc = FALSE))
+install_if_missing(cran_packages)
 
-message("\n── Installing Bioconductor packages ──────────────────────────")
-invisible(lapply(pkgs_bioc, install_if_missing, bioc = TRUE))
 
-# Uncomment the next line to install optional packages:
-# invisible(lapply(pkgs_optional, install_if_missing, bioc = FALSE))
+# -----------------------------------------------------------------------------
+# 2. PAQUETES DE BIOCONDUCTOR
+# -----------------------------------------------------------------------------
+bioc_packages <- c(
+  "GenomicRanges",  # Representación y operaciones sobre rangos genómicos
+                    # (findOverlaps, pintersect, IRanges, GRanges…)
+  "IRanges",        # Dependencia de GenomicRanges (rangos de enteros)
+  "S4Vectors",      # Infraestructura S4 compartida por Bioconductor
+  "BiocGenerics"    # Generics compartidos por todos los paquetes Bioconductor
+)
 
-message("\n✅ All dependencies installed.")
-message("   Launch the app with: shiny::runApp('app.R')")
-message("   Or open app.R in RStudio and click 'Run App'.")
+cat("\n=============================================================================\n")
+cat("Instalando paquetes Bioconductor...\n")
+cat("=============================================================================\n")
+
+# Instalar BiocManager si no está disponible
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  cat("  Instalando BiocManager...\n")
+  install.packages("BiocManager", repos = "https://cloud.r-project.org")
+}
+
+missing_bioc <- bioc_packages[!bioc_packages %in% rownames(installed.packages())]
+if (length(missing_bioc) == 0) {
+  cat("✓ Todos los paquetes Bioconductor ya están instalados.\n")
+} else {
+  cat(paste0("  Instalando: ", paste(missing_bioc, collapse = ", "), "\n"))
+  BiocManager::install(missing_bioc, ask = FALSE, update = FALSE)
+}
+
+
+# -----------------------------------------------------------------------------
+# 3. VERIFICACIÓN FINAL
+# -----------------------------------------------------------------------------
+cat("\n=============================================================================\n")
+cat("Verificación de dependencias...\n")
+cat("=============================================================================\n")
+
+all_packages <- c(cran_packages, bioc_packages)
+installed_ok  <- all_packages[all_packages %in% rownames(installed.packages())]
+not_installed <- setdiff(all_packages, installed_ok)
+
+cat(paste0("✓ Instalados correctamente: ", length(installed_ok), "/", length(all_packages), "\n"))
+
+if (length(not_installed) > 0) {
+  cat("\n⚠  Los siguientes paquetes NO se pudieron instalar:\n")
+  cat(paste0("   - ", not_installed, collapse = "\n"), "\n")
+  cat("\nIntenta instalarlos manualmente:\n")
+  cat('  install.packages(c("', paste(intersect(not_installed, cran_packages), collapse = '", "'), '"))\n')
+  if (length(intersect(not_installed, bioc_packages)) > 0) {
+    cat('  BiocManager::install(c("', paste(intersect(not_installed, bioc_packages), collapse = '", "'), '"))\n')
+  }
+} else {
+  cat("\n✓ Todas las dependencias están disponibles.\n")
+  cat("  El pipeline está listo para ejecutarse.\n")
+}
+
+cat("=============================================================================\n")
