@@ -1,7 +1,6 @@
 # =============================================================================
 # app.R — Shiny interface for the Genomic CNV/SV Analysis Pipeline
 # =============================================================================
-
 library(shiny)
 library(bslib)
 library(DT)
