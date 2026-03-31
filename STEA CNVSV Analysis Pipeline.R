@@ -2463,7 +2463,7 @@ server <- function(input, output, session) {
           updateSelectInput(session, "pdf_familia_sel", choices = c("— Select family —" = "", setNames(fams, fams)))
           updateSelectizeInput(session, "filtro_herencia", choices = hers, server = TRUE)
           
-          scores <- suppressWarnings(as.numeric(All$AnnotSV_ranking_score))
+          scores <- suppressWarnings(as.numeric(gsub(",", ".", All$AnnotSV_ranking_score)))
           scores <- scores[is.finite(scores)]
           if (length(scores) > 0)
             updateSliderInput(session, "filtro_score",
@@ -2590,14 +2590,16 @@ server <- function(input, output, session) {
       else if (done_sel == "pending")
         df <- df[!all_fams_df %in% fams_done, , drop = FALSE]
     }
-    score_col <- suppressWarnings(as.numeric(df$AnnotSV_ranking_score))
     solo_con_score <- isTRUE(input$filtro_solo_con_score)
     if (solo_con_score) {
       if ("Annotation_mode" %in% names(df)) {
         df <- df[is.na(df$Annotation_mode) | trimws(tolower(df$Annotation_mode)) != "split", , drop = FALSE]
       }
-    } else {
-      df <- df[is.na(score_col) | score_col >= input$filtro_score, ]
+    }
+    
+    score_col <- suppressWarnings(as.numeric(gsub(",", ".", df$AnnotSV_ranking_score)))
+    if (!is.null(input$filtro_score)) {
+      df <- df[is.na(score_col) | score_col >= input$filtro_score, , drop = FALSE]
     }
     
     df
