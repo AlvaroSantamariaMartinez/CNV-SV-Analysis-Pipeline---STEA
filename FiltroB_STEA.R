@@ -25,6 +25,10 @@ if (!exists("CONFIG")) {
     umbral_jaccard       = 0.50,   # minimum Jaccard required at the "Probable" level
     margen_lateral       = 3e6,    # 3 Mb maximum allowed deviation per side
     umbral_longitud_similar = 0.70,  # minimum ratio min(len_h,len_p)/max(len_h,len_p) for gene-based match without overlap
+    umbral_contencion       = 0.80,  # minimum fraction of the PROBAND variant covered by the parent (containment match)
+    # Detects: proband CNV fully inside a larger parent CNV — sim_maxlen would be too low but
+    # the proband is clearly inherited. e.g. proband 100 kb inside parent 400 kb →
+    # sim_maxlen = 0.25 (would fail), but prop_hijo = 1.0 (clearly inherited).
     deduplicar_regiones  = TRUE,   # TRUE = collapse similar variants (same chr+type, sim >= umbral_herencia)
     # FALSE = keep all variants without collapsing
     n_cores         = max(1L, detectCores(logical = FALSE) - 1L)  # physical cores - 1
@@ -539,7 +543,9 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
           gt_vec_prog[rows] <- sub(":.*", "", raw)
         }
       }
-      mask_gt <- gt_vec_prog %in% c("0/1", "1/1", "./1")
+      # GT filter: keep only variants with valid het/hom calls.
+      # Includes 1/0 and 1/. which are equivalent to 0/1 and ./1 in phased/unphased VCFs.
+      mask_gt <- gt_vec_prog %in% c("0/1", "1/0", "1/1", "./1", "1/.")
       dt_f <- dt_f[mask_gt]
     }
     dt_f
@@ -718,6 +724,25 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
   }
   
   # --- INHERITANCE ANALYSIS ---
+  # ── Pre-extract proband genotype ─────────────────────────────────────────────
+  # MUST happen BEFORE the inheritance block so the rescue pass (which checks
+  # proband GT to determine rescue priority) has the column available.
+  # The later Genotipo_Hijo block (post-sorting) propagates it to "split" rows
+  # and is kept for that purpose; it will not re-extract (guarded by column check).
+  if ("Samples_ID" %in% colnames(dt_fase2) && !"Genotipo_Hijo" %in% colnames(dt_fase2)) {
+    gt_hijo_early <- rep(NA_character_, nrow(dt_fase2))
+    sids_early    <- as.character(dt_fase2$Samples_ID)
+    for (sid in unique(sids_early)) {
+      rows <- which(sids_early == sid)
+      if (sid %in% colnames(dt_fase2)) {
+        raw <- as.character(dt_fase2[[sid]][rows])
+        gt_hijo_early[rows] <- sub(":.*", "", raw)
+      }
+    }
+    dt_fase2[, Genotipo_Hijo := gt_hijo_early]
+    rm(gt_hijo_early, sids_early)
+  }
+  
   dt_fase2[, Tipo_Herencia      := NA_character_]
   dt_fase2[, IDs_Coincidencia_PA := NA_character_]
   dt_fase2[, IDs_Coincidencia_MA := NA_character_]
@@ -726,11 +751,15 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     if(nrow(dt) == 0 || !"SV_chrom" %in% colnames(dt)) return(data.table())
     id_col <- if("AnnotSV_ID" %in% colnames(dt)) as.character(dt$AnnotSV_ID) else as.character(seq_len(nrow(dt)))
     
-    # Classify type: covers both SVs (DEL/DUP) and CNVs (loss/gain)
+    # Classify type: covers CNVs (DEL/DUP via loss/gain) and SVs (INS, INV).
+    # INS and INV are now recognised so their inheritance can be detected.
+    # BND/TRA remain "OTHER" — they lack simple coordinate semantics for overlap.
     sv_type_up <- toupper(as.character(dt$SV_type))
     tipo_vec <- fcase(
-      grepl("DEL|LOSS", sv_type_up), "DEL",
-      grepl("DUP|GAIN", sv_type_up), "DUP",
+      grepl("DEL|LOSS",    sv_type_up), "DEL",
+      grepl("DUP|GAIN",    sv_type_up), "DUP",
+      grepl("INS|INSERT",  sv_type_up), "INS",
+      grepl("INV|INVERS",  sv_type_up), "INV",
       default = "OTHER"
     )
     
@@ -778,6 +807,106 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     dt_norm <- dt_norm[!is.na(start) & !is.na(end) & type != "OTHER"]
     setkey(dt_norm, chr, start, end)
     return(dt_norm)
+  }
+  
+  # ---------------------------------------------------------------------------
+  # calc_herencia_rescue — relaxed-threshold pass for suspicious De novo calls
+  # ---------------------------------------------------------------------------
+  # Used ONLY as a second pass on proband variants that:
+  #   (a) were not matched by calc_herencia, AND
+  #   (b) have a homozygous proband genotype (1/1)
+  #
+  # A truly de novo homozygous CNV/SV is biologically implausible:
+  # two independent identical de novo events on both alleles is essentially
+  # impossible.  The most likely explanation is that one or both parents carry
+  # the same variant with slightly different breakpoints (caller variability),
+  # causing the regular sim_maxlen to fall below CONFIG$umbral_herencia_lax.
+  #
+  # Key difference from calc_herencia:
+  #   sim = pmax(overlap/max(len), overlap/min(len))
+  # The second term ("contained" metric) rescues the common case where a large
+  # parent CNV fully contains a smaller proband CNV:
+  #   e.g. proband 100 kb, parent 160 kb, overlap 95 kb
+  #   → sim_maxlen = 0.59  (fails Probable threshold of 0.60)
+  #   → sim_min    = 0.95  (passes rescue threshold)
+  #
+  # All matches from this pass are always labelled "Probable", never "Strong".
+  # ---------------------------------------------------------------------------
+  UMBRAL_RESCUE  <- CONFIG$umbral_herencia_lax * 0.80   # e.g. 0.60 * 0.80 = 0.48
+  JACCARD_RESCUE <- CONFIG$umbral_jaccard       * 0.70   # e.g. 0.50 * 0.70 = 0.35
+  
+  calc_herencia_rescue <- function(hijo, prog,
+                                   umbral_sim = UMBRAL_RESCUE,
+                                   umbral_jac = JACCARD_RESCUE) {
+    n <- nrow(hijo)
+    resultado <- list(
+      heredado  = rep(FALSE, n),
+      confianza = rep(NA_character_, n),
+      ids_match = rep(NA_character_, n),
+      genotype  = rep(NA_character_, n)
+    )
+    if (nrow(prog) == 0 || n == 0) return(resultado)
+    
+    gr_hijo <- GRanges(
+      seqnames = hijo$chr,
+      ranges   = IRanges(start = hijo$start, end = hijo$end),
+      row_idx  = hijo$row_idx,
+      type     = hijo$type,
+      len      = hijo$end - hijo$start + 1L
+    )
+    gr_prog <- GRanges(
+      seqnames = prog$chr,
+      ranges   = IRanges(start = prog$start, end = prog$end),
+      annot_id = prog$annot_id,
+      type     = prog$type,
+      genotype = prog$genotype,
+      len      = prog$end - prog$start + 1L
+    )
+    
+    hits <- findOverlaps(gr_hijo, gr_prog, type = "any")
+    if (length(hits) == 0) return(resultado)
+    
+    h_idx <- queryHits(hits)
+    p_idx <- subjectHits(hits)
+    
+    tipo_ok <- gr_hijo$type[h_idx] == gr_prog$type[p_idx] &
+      gr_hijo$type[h_idx] != "OTHER"
+    if (!any(tipo_ok)) return(resultado)
+    h_idx <- h_idx[tipo_ok]
+    p_idx <- p_idx[tipo_ok]
+    
+    h_start <- start(gr_hijo)[h_idx];  h_end <- end(gr_hijo)[h_idx]
+    p_start <- start(gr_prog)[p_idx];  p_end <- end(gr_prog)[p_idx]
+    h_len   <- gr_hijo$len[h_idx];     p_len <- gr_prog$len[p_idx]
+    
+    ovl_w <- pmax(0L, pmin(h_end, p_end) - pmax(h_start, p_start) + 1L)
+    
+    # Use the more generous of sim_maxlen and sim_contained.
+    # sim_contained catches "large parent contains small proband" cases where
+    # sim_maxlen would fail the regular threshold despite very high actual overlap.
+    sim_maxlen    <- ovl_w / pmax(h_len, p_len)
+    sim_contained <- ovl_w / pmin(h_len, p_len)
+    sim_v         <- pmax(sim_maxlen, sim_contained)
+    jac_v         <- ovl_w / (h_len + p_len - ovl_w)
+    
+    ov <- data.table(
+      row_idx  = gr_hijo$row_idx[h_idx],
+      annot_id = gr_prog$annot_id[p_idx],
+      genotype = gr_prog$genotype[p_idx],
+      sim      = sim_v,
+      jac      = jac_v
+    )
+    ov_ok <- ov[sim >= umbral_sim & jac >= umbral_jac]
+    if (nrow(ov_ok) == 0) return(resultado)
+    
+    best <- ov_ok[order(row_idx, -sim, -jac, annot_id), .SD[1], by = row_idx]
+    pos  <- match(hijo$row_idx, best$row_idx)
+    val  <- !is.na(pos)
+    resultado$heredado[val]  <- TRUE
+    resultado$confianza[val] <- "Probable"   # always Probable in rescue pass
+    resultado$ids_match[val] <- best$annot_id[pos[val]]
+    resultado$genotype[val]  <- best$genotype[pos[val]]
+    return(resultado)
   }
   
   calc_herencia <- function(hijo, prog) {
@@ -836,6 +965,12 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     ovl_width <- pmax(0L, pmin(h_end, p_end) - pmax(h_start, p_start) + 1L)
     max_len   <- pmax(h_len, p_len)                        # pmax(width_proband, width_parent)
     sim_maxlen <- ovl_width / max_len                      # sim = 1 - d
+    # prop_hijo: fraction of the PROBAND covered by the parent.
+    # Key for containment: proband 100 kb inside parent 400 kb →
+    #   sim_maxlen = 0.25 (fails all thresholds), but prop_hijo = 1.0 (clearly inherited).
+    # This metric is NOT used for sim_maxlen-style symmetric matching; it is only
+    # triggered when prop_hijo >= CONFIG$umbral_contencion (default 0.80).
+    prop_hijo  <- ovl_width / h_len
     # Complementary Jaccard
     union_len  <- h_len + p_len - ovl_width
     jaccard    <- ovl_width / union_len
@@ -845,13 +980,22 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
       annot_id   = gr_prog$annot_id[p_idx],
       genotype   = gr_prog$genotype[p_idx],
       sim_maxlen = sim_maxlen,
+      prop_hijo  = prop_hijo,
       jaccard    = jaccard
     )
     
-    # Assign confidence level
+    # Assign confidence level.
+    # Three routes to inheritance:
+    #   (1) Strong:              sim_maxlen >= umbral_herencia (symmetric, both agree)
+    #   (2) Probable (symmetric): sim_maxlen >= umbral_herencia_lax AND Jaccard >= umbral_jaccard
+    #   (3) Probable (containment): prop_hijo >= umbral_contencion
+    #       → Catches "proband CNV contained within larger parent CNV" where sim_maxlen
+    #         is artificially low due to size asymmetry, even though the entire proband
+    #         variant is biologically accounted for by the parent variant.
     ov[, confianza := fcase(
-      sim_maxlen >= CONFIG$umbral_herencia,                                          "Strong",
-      sim_maxlen >= CONFIG$umbral_herencia_lax & jaccard >= CONFIG$umbral_jaccard,   "Probable",
+      sim_maxlen >= CONFIG$umbral_herencia,                                         "Strong",
+      sim_maxlen >= CONFIG$umbral_herencia_lax & jaccard >= CONFIG$umbral_jaccard,  "Probable",
+      prop_hijo  >= CONFIG$umbral_contencion,                                        "Probable",
       default = NA_character_
     )]
     
@@ -962,8 +1106,10 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
         start = as.numeric(SV_start),
         end   = as.numeric(SV_end),
         type  = fcase(
-          grepl("DEL|LOSS", toupper(SV_type)), "DEL",
-          grepl("DUP|GAIN", toupper(SV_type)), "DUP",
+          grepl("DEL|LOSS",   toupper(SV_type)), "DEL",
+          grepl("DUP|GAIN",   toupper(SV_type)), "DUP",
+          grepl("INS|INSERT", toupper(SV_type)), "INS",
+          grepl("INV|INVERS", toupper(SV_type)), "INV",
           default = "OTHER"
         ),
         gene  = {
@@ -986,6 +1132,66 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
       ids_ma  <- res_ma$ids_match
       gt_pa   <- res_pa$genotype
       gt_ma   <- res_ma$genotype
+      
+      # --- RESCUE PASS for unmatched proband variants ---
+      # Genotipo_Hijo was extracted BEFORE this block (early extraction fix), so it
+      # is always available here regardless of execution order.
+      gt_hijo_rescue <- if ("Genotipo_Hijo" %in% colnames(dt_fase2)) {
+        dt_fase2$Genotipo_Hijo[filas_her_idx]
+      } else {
+        rep(NA_character_, length(filas_her_idx))
+      }
+      
+      # es_hom_denovo: kept solely for the De_novo_Quality diagnostic flag below.
+      # It is NO LONGER used to gate the rescue pass (rescue is now extended to all
+      # unmatched variants — see es_candidato_rescue).
+      es_hom_denovo <- (!her_pa & !her_ma) &
+        !is.na(gt_hijo_rescue) & gt_hijo_rescue == "1/1"
+      # Previously only triggered for 1/1 proband genotype. Extended to ALL variants
+      # not matched by the regular pass, because:
+      #   (a) Breakpoint caller variability affects both 0/1 and 1/1 genotypes.
+      #   (b) Extreme containment cases (proband much smaller than parent, prop_hijo
+      #       at the boundary of umbral_contencion) may still be missed by the main pass.
+      #   (c) 1/1 de novo is biologically implausible regardless of size ratio.
+      #
+      # Rescue uses pmax(sim_maxlen, sim_contained) which specifically recovers the
+      # "large parent fully contains small proband" scenario that the main pass may miss
+      # when prop_hijo falls just below umbral_contencion.
+      es_candidato_rescue <- !her_pa & !her_ma
+      
+      if (any(es_candidato_rescue)) {
+        n_hom <- sum(es_candidato_rescue & !is.na(gt_hijo_rescue) & gt_hijo_rescue == "1/1")
+        n_het <- sum(es_candidato_rescue & (!is.na(gt_hijo_rescue) & gt_hijo_rescue != "1/1" |
+                                              is.na(gt_hijo_rescue)))
+        cat(paste0("      [Rescue] ", sum(es_candidato_rescue),
+                   " unmatched variant(s) (1/1: ", n_hom, " | other/unknown: ", n_het,
+                   ") — retrying with relaxed thresholds...\n"))
+        
+        idx_rescue      <- which(es_candidato_rescue)
+        dt_hijo_rescue  <- dt_hijo[idx_rescue, ]
+        
+        resc_pa <- calc_herencia_rescue(dt_hijo_rescue, dt_pa_n)
+        resc_ma <- calc_herencia_rescue(dt_hijo_rescue, dt_ma_n)
+        
+        # Merge rescue results back only where the main pass found nothing
+        for (fi in seq_along(idx_rescue)) {
+          gi <- idx_rescue[fi]
+          if (resc_pa$heredado[fi] && !her_pa[gi]) {
+            her_pa[gi]  <- TRUE
+            conf_pa[gi] <- resc_pa$confianza[fi]
+            ids_pa[gi]  <- resc_pa$ids_match[fi]
+            gt_pa[gi]   <- resc_pa$genotype[fi]
+          }
+          if (resc_ma$heredado[fi] && !her_ma[gi]) {
+            her_ma[gi]  <- TRUE
+            conf_ma[gi] <- resc_ma$confianza[fi]
+            ids_ma[gi]  <- resc_ma$ids_match[fi]
+            gt_ma[gi]   <- resc_ma$genotype[fi]
+          }
+        }
+        cat(paste0("      [Rescue] Rescued: PA=", sum(resc_pa$heredado),
+                   " MA=", sum(resc_ma$heredado), "\n"))
+      }
       
       # TRUE if the parent file has real data (not empty)
       tiene_padre <- nrow(dt_padre_filtrado) > 0
@@ -1034,17 +1240,54 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
       dt_fase2[filas_her_idx, IDs_Coincidencia_PA := ids_pa]
       dt_fase2[filas_her_idx, IDs_Coincidencia_MA := ids_ma]
       
+      # --- De_novo_Quality flag ---
+      # Adds a diagnostic column to highlight De novo calls that deserve manual review.
+      # Does NOT change Tipo_Herencia; it is purely informational.
+      #
+      #   "CHECK: hom proband"     — proband is 1/1 yet still De novo after rescue pass.
+      #                              This is very unusual; likely a caller artefact or a
+      #                              genuinely rare homozygous de novo (e.g. UPD + de novo).
+      #   "INCOMPLETE: missing parent" — De novo call but at least one parent file is absent,
+      #                              so "de novo" cannot be confirmed: it may simply be
+      #                              inherited from the missing parent.
+      #   NA                       — no concern: either not De novo, or De novo with both
+      #                              parents present and diploid proband genotype.
+      {
+        gt_full_flag <- if ("Genotipo_Hijo" %in% colnames(dt_fase2)) {
+          dt_fase2$Genotipo_Hijo[filas_her_idx]
+        } else {
+          rep(NA_character_, length(tipo_her))
+        }
+        
+        denovo_flag <- rep(NA_character_, length(tipo_her))
+        
+        # Case A: De novo but proband is homozygous — very suspicious even after rescue
+        denovo_flag[
+          tipo_her == "De novo" &
+            !is.na(gt_full_flag) & gt_full_flag == "1/1"
+        ] <- "CHECK: hom proband"
+        
+        # Case B: De novo but at least one parent file is missing — cannot be confirmed
+        denovo_flag[
+          tipo_her == "De novo" & (!tiene_padre | !tiene_madre) &
+            is.na(denovo_flag)   # don't overwrite Case A
+        ] <- "INCOMPLETE: missing parent"
+        
+        dt_fase2[filas_her_idx, De_novo_Quality := denovo_flag]
+      }
+      
       # Propagate from full → split rows by AnnotSV_ID safely
       if(tiene_modo && "AnnotSV_ID" %in% colnames(dt_fase2)) {
-        dt_her_map <- dt_fase2[Annotation_mode == "full", .(AnnotSV_ID, Tipo_Herencia, IDs_Coincidencia_PA, IDs_Coincidencia_MA)]
+        dt_her_map <- dt_fase2[Annotation_mode == "full", .(AnnotSV_ID, Tipo_Herencia, IDs_Coincidencia_PA, IDs_Coincidencia_MA, De_novo_Quality)]
         dt_her_map <- unique(dt_her_map, by = "AnnotSV_ID")
         
-        dt_fase2[Annotation_mode == "split", c("Tipo_Herencia", "IDs_Coincidencia_PA", "IDs_Coincidencia_MA") := {
+        dt_fase2[Annotation_mode == "split", c("Tipo_Herencia", "IDs_Coincidencia_PA", "IDs_Coincidencia_MA", "De_novo_Quality") := {
           idx <- match(AnnotSV_ID, dt_her_map$AnnotSV_ID)
           list(
             dt_her_map$Tipo_Herencia[idx],
             dt_her_map$IDs_Coincidencia_PA[idx],
-            dt_her_map$IDs_Coincidencia_MA[idx]
+            dt_her_map$IDs_Coincidencia_MA[idx],
+            dt_her_map$De_novo_Quality[idx]
           )
         }]
       }
@@ -1053,33 +1296,22 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     cat("      \u26a0 No parent files available; inheritance not calculated\n")
   }
   
-  # --- PROBAND GENOTYPE ---
-  # Extract proband GT in the same way as for parents: using Samples_ID
-  # as the sample column name and taking the field before the first ":".
-  # Applied only to "full" rows; "split" rows inherit it by AnnotSV_ID.
-  if ("Samples_ID" %in% colnames(dt_fase2)) {
-    gt_hijo_vec <- rep(NA_character_, nrow(dt_fase2))
-    sids_hijo   <- as.character(dt_fase2$Samples_ID)
-    for (sid in unique(sids_hijo)) {
-      rows <- which(sids_hijo == sid)
-      if (sid %in% colnames(dt_fase2)) {
-        raw <- as.character(dt_fase2[[sid]][rows])
-        gt_hijo_vec[rows] <- sub(":.*", "", raw)
-      }
-    }
-    dt_fase2[, Genotipo_Hijo := gt_hijo_vec]
-    
-    # Propagate from full -> split by AnnotSV_ID (same as Tipo_Herencia)
-    if ("Annotation_mode" %in% colnames(dt_fase2) && "AnnotSV_ID" %in% colnames(dt_fase2)) {
-      map_gt <- dt_fase2[Annotation_mode == "full", .(AnnotSV_ID, Genotipo_Hijo)]
-      map_gt <- unique(map_gt, by = "AnnotSV_ID")
-      dt_fase2[Annotation_mode == "split", Genotipo_Hijo := {
-        idx <- match(AnnotSV_ID, map_gt$AnnotSV_ID)
-        map_gt$Genotipo_Hijo[idx]
-      }]
-    }
-  } else {
+  # --- PROBAND GENOTYPE (split-row propagation) ---
+  # GT was already extracted into Genotipo_Hijo before the inheritance block.
+  # Here we only need to propagate it from "full" → "split" rows by AnnotSV_ID.
+  # If, for any reason, the column is still absent (e.g. no Samples_ID column),
+  # we create it here as NA so downstream code never errors.
+  if (!"Genotipo_Hijo" %in% colnames(dt_fase2)) {
     dt_fase2[, Genotipo_Hijo := NA_character_]
+  }
+  # Propagate full → split rows by AnnotSV_ID
+  if ("Annotation_mode" %in% colnames(dt_fase2) && "AnnotSV_ID" %in% colnames(dt_fase2)) {
+    map_gt <- dt_fase2[Annotation_mode == "full", .(AnnotSV_ID, Genotipo_Hijo)]
+    map_gt <- unique(map_gt, by = "AnnotSV_ID")
+    dt_fase2[Annotation_mode == "split", Genotipo_Hijo := {
+      idx <- match(AnnotSV_ID, map_gt$AnnotSV_ID)
+      map_gt$Genotipo_Hijo[idx]
+    }]
   }
   
   # --- SORTING ---
@@ -1124,7 +1356,7 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     }
   }
   
-  cols_inicio  <- c("Tipo_Herencia", "Genotipo_Hijo", "Tipo_Rango", "En_Panel_Genes", "AnnotSV_ranking_score")
+  cols_inicio  <- c("Tipo_Herencia", "De_novo_Quality", "Genotipo_Hijo", "Tipo_Rango", "En_Panel_Genes", "AnnotSV_ranking_score")
   cols_fin     <- c("IDs_Coincidencia_PA", "IDs_Coincidencia_MA")
   # Remove internal auxiliary columns that should not appear in the Excel output
   cols_aux     <- c("idx_original", "ranking_numeric", ".src_row_")
@@ -1211,6 +1443,7 @@ guardar_excel_estilizado <- function(lista_resultados, ruta_salida) {
     col_ran <- which(names(df) == "Tipo_Rango")
     col_sfa <- which(names(df) == "En_Panel_Genes")
     col_sco <- which(names(df) == "AnnotSV_ranking_score")
+    col_dnq <- which(names(df) == "De_novo_Quality")
     
     if(length(col_her) > 0) {
       rows_denovo   <- which(!is.na(df$Tipo_Herencia) & df$Tipo_Herencia %in% c("De novo", "Unknown"))
@@ -1254,6 +1487,16 @@ guardar_excel_estilizado <- function(lista_resultados, ruta_salida) {
       if(length(rows_rojo) > 0)    addStyle(wb, nombre_hoja, st_red,    rows = rows_rojo + 1,    cols = col_sco)
     }
     
+    if(length(col_dnq) > 0 && "De_novo_Quality" %in% names(df)) {
+      # De_novo_Quality: highlight suspicious De novo calls for manual review
+      st_dnq_hom  <- createStyle(fgFill = "#FF6B6B", fontColour = "#FFFFFF", textDecoration = "bold")
+      st_dnq_miss <- createStyle(fgFill = "#FFD580", fontColour = "#5A3E00")
+      rows_hom  <- which(!is.na(df$De_novo_Quality) & df$De_novo_Quality == "CHECK: hom proband")
+      rows_miss <- which(!is.na(df$De_novo_Quality) & df$De_novo_Quality == "INCOMPLETE: missing parent")
+      if(length(rows_hom)  > 0) addStyle(wb, nombre_hoja, st_dnq_hom,  rows = rows_hom  + 1, cols = col_dnq)
+      if(length(rows_miss) > 0) addStyle(wb, nombre_hoja, st_dnq_miss, rows = rows_miss + 1, cols = col_dnq)
+    }
+    
     setColWidths(wb, nombre_hoja, cols = 1:ncol(df), widths = "auto")
   }
   
@@ -1274,39 +1517,50 @@ EXCEPCIONES_PROGENITORES <- list(
   # The code will look for a directory whose name ends in paste0(parent_id, suffix)
   # e.g. for PA = "G04PMP068" it will look for a directory ending in "G04PMP068PA".
   # ⚠ Make sure the parent directory exists with that exact suffix.
-  "G04PMP069" = list(PA = "G04PMP068", MA = "G04PMP068")
+  "G04PMP069" = list(PA = "G04PMP068", MA = "G04PMP068"), "HVAPM0015"=list(PA="HVAPM0053", MA="HVAPM0053")
 )
 
-buscar_dir_progenitor <- function(id_familia, sufijo, directorios_sub) {
+todas_las_carpetas_cohorte <- list.dirs(CONFIG$ruta_entrada, full.names = TRUE, recursive = TRUE)
+
+# Función actualizada
+buscar_dir_progenitor <- function(id_familia, sufijo, directorios_sub, todos_directorios) {
+  
+  # 1. Búsqueda de Excepciones (Nivel Global)
   if(id_familia %in% names(EXCEPCIONES_PROGENITORES)) {
     id_prog <- EXCEPCIONES_PROGENITORES[[id_familia]][[sufijo]]
     if(!is.null(id_prog)) {
-      excepcion <- directorios_sub[grepl(paste0(id_prog, sufijo, "$"), basename(directorios_sub), ignore.case = TRUE)][1]
+      # Buscamos en TODOS los directorios de la cohorte, no solo en la subcarpeta actual
+      excepcion <- todos_directorios[grepl(paste0(id_prog, sufijo, "$"), basename(todos_directorios), ignore.case = TRUE)][1]
+      
       if(!is.na(excepcion)) {
-        cat(paste0("  \u2139 Parent exception applied for ", id_familia, sufijo,
+        cat(paste0("  ℹ Parent expception applied fo: ", id_familia, sufijo,
                    ": ", basename(excepcion), "\n"))
         return(excepcion)
+      } else {
+        cat(paste0("  ⚠ Exception definded for folder:", id_prog, sufijo, " Not found in cohort\n"))
       }
     }
   }
   
+  # 2. Búsqueda Exacta (Nivel Local)
   exacto <- directorios_sub[grepl(paste0(id_familia, sufijo, "$"), directorios_sub, ignore.case = TRUE)][1]
   if(!is.na(exacto)) return(exacto)
   
-  prefijo       <- sub("\\d+$", "", id_familia)
-  num_hijo      <- sub("^.*?(\\d+)$", "\\1", id_familia)
-  num_hijo_sin0 <- sub("^0+", "", num_hijo)
+  # 3. Búsqueda Compartida (Nivel Local)
+  prefijo       <- sub("\\d+$", "", id_familia)       
+  num_hijo      <- sub("^.*?(\\d+)$", "\\1", id_familia)   
+  num_hijo_sin0 <- sub("^0+", "", num_hijo)           
   
   patron_compartido <- paste0(
-    "^", prefijo,
-    "(\\d+-(", num_hijo, "|", num_hijo_sin0, ")|(", num_hijo, "|", num_hijo_sin0, ")-\\d+)",
+    "^", prefijo, 
+    "(\\d+-(", num_hijo, "|", num_hijo_sin0, ")|(", num_hijo, "|", num_hijo_sin0, ")-\\d+)", 
     sufijo, "$"
   )
   
   compartido <- directorios_sub[grepl(patron_compartido, basename(directorios_sub), ignore.case = TRUE)][1]
   
   if(!is.na(compartido)) {
-    cat(paste0("  \u2139 Shared parent detected for ", id_familia, sufijo, ": ", basename(compartido), "\n"))
+    cat(paste0("  ℹ Shared parents detected for: ", id_familia, sufijo, ": ", basename(compartido), "\n"))
     return(compartido)
   }
   return(NA)
@@ -1315,13 +1569,17 @@ buscar_dir_progenitor <- function(id_familia, sufijo, directorios_sub) {
 procesar_familia <- function(id_familia, directorios_sub, ruta_salida_sub) {
   
   dir_hi <- directorios_sub[grepl(paste0(id_familia, "HI$"), directorios_sub, ignore.case = TRUE)][1]
-  dir_pa <- buscar_dir_progenitor(id_familia, "PA", directorios_sub)
-  dir_ma <- buscar_dir_progenitor(id_familia, "MA", directorios_sub)
   
+  # Añadimos 'todas_las_carpetas_cohorte' a las llamadas
+  dir_pa <- buscar_dir_progenitor(id_familia, "PA", directorios_sub, todas_las_carpetas_cohorte)
+  dir_ma <- buscar_dir_progenitor(id_familia, "MA", directorios_sub, todas_las_carpetas_cohorte)
+  
+  # (El resto de la función se queda exactamente igual)
   if(is.na(dir_hi) || !dir.exists(dir_hi)) {
-    cat("  \u26a0 No HI folder, skipping family\n")
+    cat("  ⚠ No HI family, moving on\n")
     return(FALSE)
   }
+  # ...
   
   tsv_hi <- get_tsv_cached(dir_hi)
   tsv_pa <- get_tsv_cached(dir_pa)
