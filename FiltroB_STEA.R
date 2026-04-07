@@ -461,7 +461,12 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
   
   # --- SFARI GENE FLAGGING (FULLY VECTORISED) ---
   {
-    gene_strings <- toupper(trimws(as.character(dt_annotsv$Gene_name)))
+    # Safe access: Gene_name column may be absent in some AnnotSV outputs
+    gene_strings <- if ("Gene_name" %in% colnames(dt_annotsv)) {
+      toupper(trimws(as.character(dt_annotsv$Gene_name)))
+    } else {
+      rep("", nrow(dt_annotsv))
+    }
     gene_strings[is.na(gene_strings) | gene_strings == "" | gene_strings == "."] <- ""
     gene_list <- strsplit(gene_strings, "[,;[:space:]]+", fixed = FALSE)
     dt_annotsv[, En_Panel_Genes := vapply(gene_list, function(gs) {
@@ -748,7 +753,19 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
   dt_fase2[, IDs_Coincidencia_MA := NA_character_]
   
   norm_prog <- function(dt) {
-    if(nrow(dt) == 0 || !"SV_chrom" %in% colnames(dt)) return(data.table())
+    # Validate ALL required columns exist — previously only SV_chrom was checked,
+    # which caused data.table() constructor error "argument #3 has length 0"
+    # when SV_start/SV_end/SV_type were missing from a parent file.
+    cols_requeridas <- c("SV_chrom", "SV_start", "SV_end", "SV_type")
+    cols_faltantes  <- setdiff(cols_requeridas, colnames(dt))
+    if(nrow(dt) == 0 || length(cols_faltantes) > 0) {
+      if(length(cols_faltantes) > 0 && nrow(dt) > 0) {
+        cat(paste0("      \u26a0 [norm_prog] Missing required columns: ",
+                   paste(cols_faltantes, collapse = ", "),
+                   " — skipping this parent file\n"))
+      }
+      return(data.table())
+    }
     id_col <- if("AnnotSV_ID" %in% colnames(dt)) as.character(dt$AnnotSV_ID) else as.character(seq_len(nrow(dt)))
     
     # Classify type: covers CNVs (DEL/DUP via loss/gain) and SVs (INS, INV).
@@ -863,7 +880,7 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
       len      = prog$end - prog$start + 1L
     )
     
-    hits <- findOverlaps(gr_hijo, gr_prog, type = "any")
+    hits <- findOverlaps(gr_hijo, gr_prog, type = "any", maxgap = 5e4L)
     if (length(hits) == 0) return(resultado)
     
     h_idx <- queryHits(hits)
@@ -930,7 +947,7 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
       ranges   = IRanges(start = hijo$start, end = hijo$end),
       row_idx  = hijo$row_idx,
       type     = hijo$type,
-      len      = hijo$end - hijo$start + 1L
+      sv_len   = hijo$end - hijo$start + 1L   # renombrado: evita colisión con len()
     )
     gr_prog <- GRanges(
       seqnames = prog$chr,
@@ -938,7 +955,7 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
       annot_id = prog$annot_id,
       type     = prog$type,
       genotype = prog$genotype,
-      len      = prog$end - prog$start + 1L
+      sv_len   = prog$end - prog$start + 1L   # renombrado
     )
     
     hits <- findOverlaps(gr_hijo, gr_prog, type = "any")
@@ -956,23 +973,18 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     
     # --- Overlap logic: d = 1 - (width(pintersect) / pmax(width_proband, width_parent)) ---
     # Vectorised over filtered hit pairs
-    h_start <- start(gr_hijo)[h_idx];  h_end <- end(gr_hijo)[h_idx]
-    p_start <- start(gr_prog)[p_idx];  p_end <- end(gr_prog)[p_idx]
-    h_len   <- gr_hijo$len[h_idx]
-    p_len   <- gr_prog$len[p_idx]
+    h_start    <- start(gr_hijo)[h_idx];  h_end <- end(gr_hijo)[h_idx]
+    p_start    <- start(gr_prog)[p_idx];  p_end <- end(gr_prog)[p_idx]
+    h_len_s1   <- gr_hijo$sv_len[h_idx]   # _s1: variable local de Step 1
+    p_len_s1   <- gr_prog$sv_len[p_idx]
     
-    # Vectorised pintersect: width of intersection for each pair
-    ovl_width <- pmax(0L, pmin(h_end, p_end) - pmax(h_start, p_start) + 1L)
-    max_len   <- pmax(h_len, p_len)                        # pmax(width_proband, width_parent)
-    sim_maxlen <- ovl_width / max_len                      # sim = 1 - d
-    # prop_hijo: fraction of the PROBAND covered by the parent.
-    # Key for containment: proband 100 kb inside parent 400 kb →
-    #   sim_maxlen = 0.25 (fails all thresholds), but prop_hijo = 1.0 (clearly inherited).
-    # This metric is NOT used for sim_maxlen-style symmetric matching; it is only
-    # triggered when prop_hijo >= CONFIG$umbral_contencion (default 0.80).
-    prop_hijo  <- ovl_width / h_len
-    # Complementary Jaccard
-    union_len  <- h_len + p_len - ovl_width
+    ovl_width  <- pmax(0L, pmin(h_end, p_end) - pmax(h_start, p_start) + 1L)
+    max_len    <- pmax(h_len_s1, p_len_s1)
+    min_len    <- pmin(h_len_s1, p_len_s1)
+    sim_maxlen <- ovl_width / max_len
+    sim_minlen <- ovl_width / min_len
+    prop_hijo  <- ovl_width / h_len_s1
+    union_len  <- h_len_s1 + p_len_s1 - ovl_width
     jaccard    <- ovl_width / union_len
     
     ov <- data.table(
@@ -980,22 +992,21 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
       annot_id   = gr_prog$annot_id[p_idx],
       genotype   = gr_prog$genotype[p_idx],
       sim_maxlen = sim_maxlen,
+      sim_minlen = sim_minlen,
       prop_hijo  = prop_hijo,
       jaccard    = jaccard
     )
     
-    # Assign confidence level.
-    # Three routes to inheritance:
-    #   (1) Strong:              sim_maxlen >= umbral_herencia (symmetric, both agree)
-    #   (2) Probable (symmetric): sim_maxlen >= umbral_herencia_lax AND Jaccard >= umbral_jaccard
-    #   (3) Probable (containment): prop_hijo >= umbral_contencion
-    #       → Catches "proband CNV contained within larger parent CNV" where sim_maxlen
-    #         is artificially low due to size asymmetry, even though the entire proband
-    #         variant is biologically accounted for by the parent variant.
+    thr_herencia      <- ifelse(is.null(CONFIG$umbral_herencia)      | is.na(CONFIG$umbral_herencia),      0.70, CONFIG$umbral_herencia)
+    thr_herencia_lax  <- ifelse(is.null(CONFIG$umbral_herencia_lax)  | is.na(CONFIG$umbral_herencia_lax),  0.60, CONFIG$umbral_herencia_lax)
+    thr_jaccard       <- ifelse(is.null(CONFIG$umbral_jaccard)       | is.na(CONFIG$umbral_jaccard),       0.50, CONFIG$umbral_jaccard)
+    thr_contencion    <- ifelse(is.null(CONFIG$umbral_contencion)    | is.na(CONFIG$umbral_contencion),    0.80, CONFIG$umbral_contencion)
+    
     ov[, confianza := fcase(
-      sim_maxlen >= CONFIG$umbral_herencia,                                         "Strong",
-      sim_maxlen >= CONFIG$umbral_herencia_lax & jaccard >= CONFIG$umbral_jaccard,  "Probable",
-      prop_hijo  >= CONFIG$umbral_contencion,                                        "Probable",
+      sim_maxlen  >= thr_herencia,                          "Strong ",
+      prop_hijo  >= thr_contencion  & sim_maxlen  >= thr_herencia_lax,  "Strong ",
+      sim_maxlen  >= thr_herencia_lax  & jaccard >= thr_jaccard,        "Probable ",
+      prop_hijo  >= thr_contencion  & jaccard >= thr_jaccard,           "Probable ",
       default = NA_character_
     )]
     
@@ -1041,17 +1052,41 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
         if (is.na(h_type) || h_type == "OTHER") next
         
         h_len      <- hijo$end[fi] - hijo$start[fi] + 1L
+        
+        # MOVER MASK_BASE AQUÍ ARRIBA para que esté disponible para ambos bloques
+        mask_base <- prog$chr == h_chr & prog$type == h_type
+        if (!any(mask_base)) next
+        
         h_gene_str <- hijo$gene[fi]
-        if (is.na(h_gene_str) || h_gene_str == "") next
+        sin_gen <- is.na(h_gene_str) || h_gene_str == ""
+        
+        if (sin_gen) {
+          cands_base   <- prog[mask_base, ]
+          c_len_base   <- prog_len[mask_base]
+          # CORRECCIÓN: cambiado h_len_fi a h_len
+          ratio_base   <- pmin(h_len, c_len_base) / pmax(h_len, c_len_base) 
+          umbral_sg    <- max(CONFIG$umbral_longitud_similar, 0.85)
+          mask_sg      <- ratio_base >= umbral_sg
+          if (!any(mask_sg)) next
+          cands_sg     <- cands_base[mask_sg, ]
+          ratio_sg     <- ratio_base[mask_sg]
+          best_sg      <- order(-ratio_sg, cands_sg$annot_id)[1L]
+          resultado$heredado[fi]  <- TRUE
+          resultado$confianza[fi] <- "Probable"
+          resultado$ids_match[fi] <- cands_sg$annot_id[best_sg]
+          resultado$genotype[fi]  <- cands_sg$genotype[best_sg]
+          cat(paste0("      [Length-only inheritance] Row ", fi,
+                     " | ratio_len=", round(ratio_sg[best_sg], 3),
+                     " \u2192 match ", cands_sg$annot_id[best_sg], "\n"))
+          next
+        }
         
         # Parse proband genes (separators: comma, semicolon, space)
         h_genes <- toupper(trimws(unlist(strsplit(h_gene_str, "[,;[:space:]]+"))))
         h_genes <- h_genes[nzchar(h_genes) & h_genes != "."]
         if (length(h_genes) == 0) next
         
-        # Filter parent candidates: same chr and same type
-        mask_base <- prog$chr == h_chr & prog$type == h_type
-        if (!any(mask_base)) next
+        # Las declaraciones de cands y c_len van a continuación normalmente
         cands     <- prog[mask_base, ]
         c_len     <- prog_len[mask_base]
         
@@ -1099,7 +1134,17 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
     tiene_modo <- "Annotation_mode" %in% colnames(dt_fase2)
     filas_her_idx <- if(tiene_modo) which(dt_fase2$Annotation_mode == "full") else seq_len(nrow(dt_fase2))
     
-    if(length(filas_her_idx) > 0) {
+    # Validate required columns exist in dt_fase2 before inheritance analysis
+    cols_hijo_req <- c("SV_chrom", "SV_start", "SV_end", "SV_type")
+    cols_hijo_ok  <- all(cols_hijo_req %in% colnames(dt_fase2))
+    if (!cols_hijo_ok) {
+      cat(paste0("      \u26a0 Missing columns for inheritance: ",
+                 paste(setdiff(cols_hijo_req, colnames(dt_fase2)), collapse = ", "), "\n"))
+    }
+    
+    if(length(filas_her_idx) > 0 && cols_hijo_ok) {
+      # Safe Gene_name access: column may be absent in some files
+      tiene_gene_name <- "Gene_name" %in% colnames(dt_fase2)
       dt_hijo <- dt_fase2[filas_her_idx, .(
         row_idx = filas_her_idx,
         chr   = toupper(str_trim(gsub("CHR", "", as.character(SV_chrom)))),
@@ -1113,9 +1158,13 @@ procesar_modalidad <- function(ruta_hi, ruta_pa, ruta_ma, MODO, dt_ref, genes_pa
           default = "OTHER"
         ),
         gene  = {
-          g <- toupper(trimws(as.character(Gene_name)))
-          g[is.na(g) | g == "" | g == "."] <- NA_character_
-          g
+          if (tiene_gene_name) {
+            g <- toupper(trimws(as.character(Gene_name)))
+            g[is.na(g) | g == "" | g == "."] <- NA_character_
+            g
+          } else {
+            rep(NA_character_, .N)
+          }
         }
       )]
       # setkey is not used here: joins are done via GRanges (not by data.table key)
@@ -1599,7 +1648,11 @@ procesar_familia <- function(id_familia, directorios_sub, ruta_salida_sub) {
   if(!is.na(f_cnv_hi)) {
     res_cnv <- tryCatch(
       procesar_modalidad(f_cnv_hi, f_cnv_pa, f_cnv_ma, "CNV", dt_ref, genes_panel),
-      error = function(e) { cat(paste("    [ERROR CNV]:", e$message, "\n")); NULL }
+      error = function(e) { 
+        cat(paste("    [ERROR CNV]:", e$message, "\n"))
+        cat("    [CALL]:", paste(deparse(conditionCall(e)), collapse = "\n"), "\n")
+        NULL 
+      }
     )
     if(!is.null(res_cnv)) {
       res_cnv <- data.table(ID_Familia = id_familia, res_cnv)
@@ -1610,7 +1663,11 @@ procesar_familia <- function(id_familia, directorios_sub, ruta_salida_sub) {
   if(!is.na(f_sv_hi)) {
     res_sv <- tryCatch(
       procesar_modalidad(f_sv_hi, f_sv_pa, f_sv_ma, "SV", dt_ref, genes_panel),
-      error = function(e) { cat(paste("    [ERROR SV]:", e$message, "\n")); NULL }
+      error = function(e) { 
+        cat(paste("    [ERROR SV]:", e$message, "\n"))
+        cat("    [CALL]:", paste(deparse(conditionCall(e)), collapse = "\n"), "\n")
+        NULL 
+      }
     )
     if(!is.null(res_sv)) {
       res_sv <- data.table(ID_Familia = id_familia, res_sv)

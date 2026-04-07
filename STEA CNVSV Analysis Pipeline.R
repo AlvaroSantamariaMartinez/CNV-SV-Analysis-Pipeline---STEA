@@ -1,6 +1,7 @@
 # =============================================================================
 # app.R — Shiny interface for the Genomic CNV/SV Analysis Pipeline
 # =============================================================================
+
 library(shiny)
 library(bslib)
 library(DT)
@@ -2273,17 +2274,19 @@ server <- function(input, output, session) {
     cfg$ruta_panel   <- gsub("\\", "/", cfg$ruta_panel,   fixed = TRUE)
     lineas_config <- paste0(
       'CONFIG <- list(\n',
-      '  ruta_entrada        = ', shQuote(cfg$ruta_entrada),        ',\n',
-      '  ruta_salida         = ', shQuote(cfg$ruta_salida),         ',\n',
-      '  ruta_rangos         = ', shQuote(cfg$ruta_rangos),         ',\n',
-      '  ruta_panel          = ', shQuote(cfg$ruta_panel),          ',\n',
-      '  umbral_strict       = ', cfg$umbral_strict,                ',\n',
-      '  umbral_herencia     = ', cfg$umbral_herencia,              ',\n',
-      '  umbral_herencia_lax = ', cfg$umbral_herencia_lax,          ',\n',
-      '  umbral_jaccard      = ', cfg$umbral_jaccard,               ',\n',
-      '  margen_lateral      = ', cfg$margen_lateral,               ',\n',
-      '  deduplicar_regiones = ', toupper(cfg$deduplicar),          ',\n',
-      '  n_cores             = ', cfg$n_cores,                      '\n',
+      '  ruta_entrada            = ', shQuote(cfg$ruta_entrada),        ',\n',
+      '  ruta_salida             = ', shQuote(cfg$ruta_salida),         ',\n',
+      '  ruta_rangos             = ', shQuote(cfg$ruta_rangos),         ',\n',
+      '  ruta_panel              = ', shQuote(cfg$ruta_panel),          ',\n',
+      '  umbral_strict           = ', cfg$umbral_strict,                ',\n',
+      '  umbral_herencia         = ', cfg$umbral_herencia,              ',\n',
+      '  umbral_herencia_lax     = ', cfg$umbral_herencia_lax,          ',\n',
+      '  umbral_jaccard          = ', cfg$umbral_jaccard,               ',\n',
+      '  margen_lateral          = ', cfg$margen_lateral,               ',\n',
+      '  umbral_longitud_similar = 0.70,\n',
+      '  umbral_contencion       = 0.80,\n',
+      '  deduplicar_regiones     = ', toupper(cfg$deduplicar),          ',\n',
+      '  n_cores                 = ', cfg$n_cores,                      '\n',
       ')\n'
     )
     
