@@ -204,13 +204,16 @@ deduplicar_regiones_similares <- function(dt, umbral_sim = CONFIG$umbral_herenci
     
     # ---- Case 3: normal collapse ----
     # Same inheritance, both De novo/NA, or one known and the other without information.
-    # Priority: (1) non-denovo > denovo, (2) higher rank, (3) deterministic tiebreak
+    # Priority: (1) non-denovo > denovo, (2) higher rank, (3) larger variant (full lane
+    #           prevails over split lane), (4) deterministic tiebreak
     i_gana <- if (!is_denovo[i] && is_denovo[j]) {
       TRUE
     } else if (is_denovo[i] && !is_denovo[j]) {
       FALSE
     } else if (rank_num[i] != rank_num[j]) {
       rank_num[i] > rank_num[j]
+    } else if (len_vec[i] != len_vec[j]) {
+      len_vec[i] > len_vec[j]   # larger variant (full lane) always prevails
     } else {
       tiebreak[i] <= tiebreak[j]
     }

@@ -2678,10 +2678,12 @@ server <- function(input, output, session) {
       if (is.na(clave)) return("")
       val <- rv$clasificaciones[[clave]] %||% ""
       cfg <- switch(val,
-                    "Benign"     = list(bg="#27AE60", title="Benign"),
-                    "VUS"         = list(bg="#95A5A6", title="VUS"),
-                    "Pathogenic"  = list(bg="#E74C3C", title="Pathogenic"),
-                    "In Progress" = list(bg="#8E44AD", title="In Progress"),
+                    "Benign"              = list(bg="#27AE60", title="Benign"),
+                    "Probable Benign"     = list(bg="#74b89a", title="Probable Benign"),
+                    "VUS"                 = list(bg="#95A5A6", title="VUS"),
+                    "Probable Pathogenic" = list(bg="#e07060", title="Probable Pathogenic"),
+                    "Pathogenic"          = list(bg="#E74C3C", title="Pathogenic"),
+                    "In Progress"         = list(bg="#8E44AD", title="In Progress"),
                     list(bg="transparent", title="Unclassified")
       )
       border <- if (nzchar(val)) paste0("2px solid ", cfg$bg) else "2px dashed #CCC"
@@ -3020,7 +3022,7 @@ server <- function(input, output, session) {
     if (!is.null(fd_clasif) && nrow(fd_clasif) > 0) {
       clave_clasif <- tryCatch(hacer_clave_variante(fd_clasif)[1], error = function(e) NA_character_)
       val_clasif   <- if (!is.na(clave_clasif)) rv$clasificaciones[[clave_clasif]] %||% "" else ""
-      CLASIF_BG <- c("Benign"="#27AE60","VUS"="#95A5A6","Pathogenic"="#E74C3C","In Progress"="#8E44AD")
+      CLASIF_BG <- c("Benign"="#27AE60","Probable Benign"="#74b89a","VUS"="#95A5A6","Probable Pathogenic"="#e07060","Pathogenic"="#E74C3C","In Progress"="#8E44AD")
       badge_style <- if (nzchar(val_clasif))
         paste0("display:inline-block;width:14px;height:14px;border-radius:4px;",
                "background:", CLASIF_BG[val_clasif], ";vertical-align:middle;margin-right:6px;")
@@ -3487,7 +3489,9 @@ server <- function(input, output, session) {
     req(!is.na(clave))
     ts <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
     CLASIF_LABEL <- c(
-      "Benign"="\U0001f7e2 Benign", "VUS"="\u2b1c VUS",
+      "Benign"="\U0001f7e2 Benign", "Probable Benign"="\U0001f7e2 Probable Benign",
+      "VUS"="\u2b1c VUS",
+      "Probable Pathogenic"="\U0001f534 Probable Pathogenic",
       "Pathogenic"="\U0001f534 Pathogenic", "In Progress"="\U0001f7e3 In progress"
     )
     rv$clasificaciones[[clave]] <- valor
@@ -3589,14 +3593,18 @@ server <- function(input, output, session) {
       # ── Colorear columna Clasificacion ────────────────────────────────
       if (length(col_cl) > 0) {
         estilos_cl <- list(
-          "Benign"      = createStyle(fgFill = "#D4EDDA", fontColour = "#155724",
-                                      textDecoration = "bold"),
-          "VUS"         = createStyle(fgFill = "#E2E3E5", fontColour = "#383d41",
-                                      textDecoration = "bold"),
-          "Pathogenic"  = createStyle(fgFill = "#F8D7DA", fontColour = "#721c24",
-                                      textDecoration = "bold"),
-          "In Progress" = createStyle(fgFill = "#E8D5F5", fontColour = "#4B0082",
-                                      textDecoration = "bold")
+          "Benign"              = createStyle(fgFill = "#D4EDDA", fontColour = "#27AE60",
+                                              textDecoration = "bold"),
+          "Probable Benign"     = createStyle(fgFill = "#E0F0E8", fontColour = "#74b89a",
+                                              textDecoration = "bold"),
+          "VUS"                 = createStyle(fgFill = "#E2E3E5", fontColour = "#95A5A6",
+                                              textDecoration = "bold"),
+          "Probable Pathogenic" = createStyle(fgFill = "#FADED8", fontColour = "#e07060",
+                                              textDecoration = "bold"),
+          "Pathogenic"          = createStyle(fgFill = "#F8D7DA", fontColour = "#E74C3C",
+                                              textDecoration = "bold"),
+          "In Progress"         = createStyle(fgFill = "#E8D5F5", fontColour = "#8E44AD",
+                                              textDecoration = "bold")
         )
         for (nm in names(estilos_cl)) {
           rows <- which(df$Classification == nm)
